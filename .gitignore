@@ -1,0 +1,16 @@
+venv/ 
+_pycache_/
+.ipynb_checkpoints/
+# secrets 
+.streamlit/secrets.toml
+# user data
+user_data.csv
+support_phrases.csv
+exercises_log.csv
+user_history.json
+user_profile.json
+*.json
+*.csv
+__pycache__/
+.env
+.streamlit/
