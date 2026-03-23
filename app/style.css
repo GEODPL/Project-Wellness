@@ -1176,6 +1176,22 @@ textarea:focus,
   line-height: 1.15;
   opacity: 0.95;
 }
+/* Στοχεύουμε το κείμενο μέσα στο πεδίο εισαγωγής */
+textarea {
+    color: #301934 !important; /* Σκούρο Μωβ */
+    font-weight: 500;
+}
+
+/* Αν χρησιμοποιείς το κλασικό chat_input του Streamlit */
+.stChatInput textarea {
+    color: #301934 !important;
+}
+
+/* Για να βλέπεις καθαρά και το κείμενο που "περιμένει" (placeholder) */
+textarea::placeholder {
+    color: #6a617a !important; /* Ένα πιο απαλό μωβ-γκρι */
+    opacity: 0.7;
+}
 
 
 
