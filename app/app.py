@@ -26,7 +26,14 @@ from components import (
     render_action_plan_card,
 )
 from data_logger import log_user_data
-from user_profile import load_profile, save_profile
+# Η νέα, 100% ιδιωτική διαχείριση του προφίλ στη μνήμη του browser
+def load_profile():
+    if "user_profile" not in st.session_state:
+        st.session_state.user_profile = {}
+    return st.session_state.user_profile
+
+def save_profile(new_profile):
+    st.session_state.user_profile = new_profile
 
 
 # ============================================================
