@@ -1193,6 +1193,16 @@ textarea::placeholder {
     opacity: 0.7;
 }
 
+/* Επιβολή σκούρου χρώματος σε ΟΛΑ τα κείμενα για να μην χάνονται στο Dark Mode */
+.stApp, .stApp p, .stApp span, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp div, .stMarkdown {
+    color: #2D2D2D !important;
+}
+
+/* Ειδικά για το placeholder text μέσα στα πεδία (πχ. "Όνομα χρήστη") */
+input::placeholder, textarea::placeholder {
+    color: #888888 !important;
+}
+
 
 
 
