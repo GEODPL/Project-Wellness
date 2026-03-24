@@ -1203,6 +1203,13 @@ input::placeholder, textarea::placeholder {
     color: #888888 !important;
 }
 
+/* Επιβολή χρώματος στο κείμενο που πληκτρολογεί ο χρήστης (Ονόματα, Chat, κλπ) */
+.stTextInput input, .stTextArea textarea {
+    color: #4A3D73 !important;          /* Σκούρο μωβ γράμματα */
+    background-color: #FFFFFF !important; /* Λευκό φόντο στο κουτάκι */
+    -webkit-text-fill-color: #4A3D73 !important; /* Ειδικά για Safari/iPhone */
+}
+
 
 
 
