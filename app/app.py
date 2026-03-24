@@ -1029,10 +1029,6 @@ with tab_chat:
             return sum(1 for kw in keywords if kw in t)
 
         def detect_mode_weights(text: str, mood: int, sleep: int, water: int) -> dict:
-            """
-            Dynamic Mode Blending: weights για 4 modes.
-            Χρησιμοποιεί το MODES dict που έχεις ήδη ορίσει στο app.py.
-            """
             t = (text or "").lower()
 
             scores = {
@@ -1106,7 +1102,6 @@ with tab_chat:
             threads = st.session_state.open_threads or []
             facts = st.session_state.facts_memory or []
 
-            # profile snippet
             profile_snip_parts = []
             for k in ["context", "main_goals", "main_struggles", "helpful_things", "preferred_tone", "triggers", "soothing_things"]:
                 v = (profile.get(k) or "").strip()
@@ -1114,7 +1109,6 @@ with tab_chat:
                     profile_snip_parts.append(f"- {k}: {v}")
             profile_snip = "\n".join(profile_snip_parts).strip()
 
-            # top-2 modes
             mode_instructions = []
             top2 = sorted(mode_weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
             for mode_key, w in top2:
@@ -1177,10 +1171,6 @@ ANTI-REPEAT:
             bot_text: str,
             decision_trace: list[str],
         ) -> None:
-            """
-            Προαιρετικό: αν έχεις llm_update_memory στο llm.py, θα ενημερώνει summary/threads/facts.
-            Αν δεν υπάρχει, δεν σπάει τίποτα.
-            """
             try:
                 from llm import llm_update_memory
             except Exception:
@@ -1210,7 +1200,6 @@ ANTI-REPEAT:
             st.session_state.facts_memory = out.get("facts") or prev_facts or []
             decision_trace.append("Narrative memory: ενημερώθηκαν summary/threads/facts.")
 
-        # --- Discreet professional-support indicator ((((non-diagnostic)))) ---
         def compute_support_need_score(
             text: str,
             mood: int,
@@ -1442,7 +1431,42 @@ ANTI-REPEAT:
 
         st.markdown('<div class="main-wrapper"><div class="chat-card">', unsafe_allow_html=True)
 
-        st.markdown("#### 😊 Πώς είσαι σήμερα;")
+        # === ΕΔΩ ΕΙΝΑΙ ΤΟ ΝΕΟ ΚΟΥΜΠΙ ΝΕΑΣ ΣΥΝΟΜΙΛΙΑΣ ===
+        col_title, col_btn = st.columns([3, 1])
+        with col_title:
+            st.markdown("#### 😊 Πώς είσαι σήμερα;")
+        with col_btn:
+            if st.button("🔄 Νέα Συνομιλία", use_container_width=True):
+                # Καθαρισμός προσωρινής μνήμης
+                st.session_state.messages = []
+                st.session_state.dialogue_active = False
+                st.session_state.dialogue_turns = 0
+                st.session_state.wrapup_done = False
+                st.session_state.conversation_summary = ""
+                st.session_state.open_threads = []
+                st.session_state.facts_memory = []
+                st.session_state.last_bot_outputs = []
+                st.session_state.last_checkin = {}
+                st.session_state.exercise_followup = False
+                st.session_state.last_decision_trace = []
+
+                # Καθαρισμός αποθηκευμένης μνήμης χρήστη
+                _save_persisted_chat_state({
+                    "messages": [],
+                    "dialogue_active": False,
+                    "dialogue_turns": 0,
+                    "wrapup_done": False,
+                    "conversation_summary": "",
+                    "open_threads": [],
+                    "facts_memory": [],
+                    "last_bot_outputs": [],
+                    "last_checkin": {},
+                    "exercise_followup": False,
+                    "support_indicator_history": st.session_state.get("support_indicator_history", [])
+                })
+                
+                st.rerun()
+        # === ΤΕΛΟΣ ΝΕΟΥ ΚΟΥΜΠΙΟΥ ===
 
         colA, colB, colC = st.columns(3)
         with colA:
