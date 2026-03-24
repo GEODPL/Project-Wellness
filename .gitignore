@@ -12,5 +12,5 @@ user_profile.json
 *.json
 *.csv
 __pycache__/
-.env
 .streamlit/
+.env

@@ -1,5 +1,6 @@
 import os
 import json
+import streamlit as st  # ΠΡΟΣΘΗΚΗ: Για να διαβάζει τα Secrets
 from typing import Optional, Dict, Any, List
 
 try:
@@ -7,8 +8,12 @@ try:
 except ImportError:
     OpenAI = None  # type: ignore
 
+# ΔΙΟΡΘΩΣΗ: Πρώτα κοιτάμε στα Secrets του Streamlit και μετά στο .env
+try:
+    API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+except Exception:
+    API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-API_KEY = os.getenv("OPENAI_API_KEY", "")
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 _CLIENT: Optional["OpenAI"] = None
@@ -23,6 +28,7 @@ def _build_client() -> Optional["OpenAI"]:
     if not API_KEY:
         return None
     try:
+        # Διασφαλίζουμε ότι χρησιμοποιούμε το API_KEY που βρήκαμε παραπάνω
         return OpenAI(api_key=API_KEY)
     except Exception:
         return None
@@ -82,7 +88,6 @@ def _build_system_prompt(
         f"Check-in: διάθεση {mood}/10, ύπνος {sleep}, νερό {water}.\n"
     )
 
-    # ελαφρά mode conditioning (το πραγματικό blending το κάνεις στο user prompt)
     if active_mode == "student":
         base += "Πλαίσιο: φοιτητικό άγχος/σπουδές.\n"
     elif active_mode == "work":
@@ -202,18 +207,12 @@ def llm_update_memory(
     user_text: str,
     bot_text: str,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Επιστρέφει dict:
-      {"summary": str, "threads": list[str], "facts": list[str]}
-    Σκοπός: mid-term memory, όχι output προς χρήστη.
-    """
     client = _get_client()
     if client is None:
         return None
 
     prof = _format_profile_snippet(profile)
 
-    # Βάζουμε strict JSON output για να μη σπάει.
     system_prompt = (
         "Είσαι μηχανισμός ενημέρωσης μνήμης συνομιλίας (conversation memory updater).\n"
         "Επιστρέφεις ΜΟΝΟ έγκυρο JSON, χωρίς επιπλέον κείμενο.\n"
@@ -259,7 +258,6 @@ def llm_update_memory(
         if not raw:
             return None
 
-        # robust JSON parse (αν επιστρέψει code-fence, το καθαρίζουμε)
         raw_clean = raw.strip()
         if raw_clean.startswith("```"):
             raw_clean = raw_clean.strip("`")
@@ -279,7 +277,6 @@ def llm_update_memory(
         threads = [str(x).strip() for x in threads if str(x).strip()]
         facts = [str(x).strip() for x in facts if str(x).strip()]
 
-        # μικρά clamps
         threads = threads[:8]
         facts = facts[:8]
 
