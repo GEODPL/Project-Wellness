@@ -742,11 +742,9 @@ if "conversation_phase" not in st.session_state:
     st.session_state.conversation_phase = "dialogue"  
 
 if "dialogue_history" not in st.session_state:
-    
     st.session_state.dialogue_history = []
 
 if "checkin_ctx" not in st.session_state:
-
     st.session_state.checkin_ctx = None
 
 if "pending_reflection" not in st.session_state:
@@ -754,7 +752,6 @@ if "pending_reflection" not in st.session_state:
 
 if "active_mode" not in st.session_state:
     st.session_state.active_mode = None
-
 
 if "study_anxiety_count" not in st.session_state:
     st.session_state.study_anxiety_count = 0
@@ -941,191 +938,186 @@ with tab_chat:
             """,
             unsafe_allow_html=True,
         )
-        st.stop()
+    else:
+        def _user_key() -> str:
+            email = (st.session_state.get("user_email") or "").strip().lower()
+            if not email:
+                email = (st.session_state.get("user_name") or "anon").strip().lower()
+            return email or "anon"
 
+        def _user_store_path() -> str:
+            base_dir = os.path.dirname(__file__)
+            key = _user_key()
+            h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+            return os.path.join(base_dir, f"chat_state_{h}.json")
 
-    def _user_key() -> str:
-        email = (st.session_state.get("user_email") or "").strip().lower()
-        if not email:
-            email = (st.session_state.get("user_name") or "anon").strip().lower()
-        return email or "anon"
+        def _load_persisted_chat_state() -> dict:
+            path = _user_store_path()
+            if not os.path.exists(path):
+                return {}
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f) or {}
+            except Exception:
+                return {}
 
-    def _user_store_path() -> str:
-        
-        base_dir = os.path.dirname(__file__)
-        key = _user_key()
-        h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-        return os.path.join(base_dir, f"chat_state_{h}.json")
+        def _save_persisted_chat_state(state: dict) -> None:
+            path = _user_store_path()
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
 
-    def _load_persisted_chat_state() -> dict:
-        path = _user_store_path()
-        if not os.path.exists(path):
-            return {}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f) or {}
-        except Exception:
-            return {}
+        # ============================================================
+        # Core helpers
+        # ============================================================
+        def _safe_trim(text: str, max_chars: int = 1400) -> str:
+            t = (text or "").strip()
+            if len(t) <= max_chars:
+                return t
+            return t[:max_chars].rstrip() + "…"
 
-    def _save_persisted_chat_state(state: dict) -> None:
-        path = _user_store_path()
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
-        except Exception:
-            
-            pass
+        def _clamp_int(x: float, lo: int = 0, hi: int = 100) -> int:
+            try:
+                v = int(round(float(x)))
+            except Exception:
+                v = 0
+            return max(lo, min(hi, v))
 
-    # ============================================================
-    # Core helpers
-    # ============================================================
-    def _safe_trim(text: str, max_chars: int = 1400) -> str:
-        t = (text or "").strip()
-        if len(t) <= max_chars:
-            return t
-        return t[:max_chars].rstrip() + "…"
+        def remember_bot_output(text: str) -> None:
+            t = (text or "").strip()
+            if not t:
+                return
+            st.session_state.last_bot_outputs.append(t)
+            st.session_state.last_bot_outputs = st.session_state.last_bot_outputs[-8:]
 
-    def _clamp_int(x: float, lo: int = 0, hi: int = 100) -> int:
-        try:
-            v = int(round(float(x)))
-        except Exception:
-            v = 0
-        return max(lo, min(hi, v))
+        def _get_dialogue_context_text(max_pairs: int = 10) -> str:
+            items = []
+            count = 0
+            for sender, content in st.session_state.messages[::-1]:
+                if sender in ("user", "bot"):
+                    role = "Χρήστης" if sender == "user" else "Βοηθός"
+                    items.append(f"{role}: {str(content).strip()}")
+                    count += 1
+                if count >= max_pairs * 2:
+                    break
+            items = list(reversed(items))
+            return "\n".join(items).strip()
 
-    def remember_bot_output(text: str) -> None:
-        t = (text or "").strip()
-        if not t:
-            return
-        st.session_state.last_bot_outputs.append(t)
-        st.session_state.last_bot_outputs = st.session_state.last_bot_outputs[-8:]
+        def _detect_dialogue_closure(text: str) -> bool:
+            t = (text or "").strip().lower()
+            if not t:
+                return False
+            closures = [
+                "ευχαριστώ", "ευχαριστω", "οκ", "ok", "εντάξει", "ενταξει",
+                "τέλος", "τελος", "τα λέμε", "τα λεμε", "καληνύχτα", "καληνυχτα",
+                "αυτά", "αυτα", "νομίζω οκ", "νομιζω οκ", "bye", "αντίο", "αντιο"
+            ]
+            shortish = len(t) <= 35
+            return shortish and any(c in t for c in closures)
 
-    def _get_dialogue_context_text(max_pairs: int = 10) -> str:
-        items = []
-        count = 0
-        for sender, content in st.session_state.messages[::-1]:
-            if sender in ("user", "bot"):
-                role = "Χρήστης" if sender == "user" else "Βοηθός"
-                items.append(f"{role}: {str(content).strip()}")
-                count += 1
-            if count >= max_pairs * 2:
-                break
-        items = list(reversed(items))
-        return "\n".join(items).strip()
+        def _score_keywords(text: str, keywords: list[str]) -> int:
+            t = (text or "").lower()
+            return sum(1 for kw in keywords if kw in t)
 
-    def _detect_dialogue_closure(text: str) -> bool:
-        t = (text or "").strip().lower()
-        if not t:
-            return False
-        closures = [
-            "ευχαριστώ", "ευχαριστω", "οκ", "ok", "εντάξει", "ενταξει",
-            "τέλος", "τελος", "τα λέμε", "τα λεμε", "καληνύχτα", "καληνυχτα",
-            "αυτά", "αυτα", "νομίζω οκ", "νομιζω οκ", "bye", "αντίο", "αντιο"
-        ]
-        shortish = len(t) <= 35
-        return shortish and any(c in t for c in closures)
+        def detect_mode_weights(text: str, mood: int, sleep: int, water: int) -> dict:
+            """
+            Dynamic Mode Blending: weights για 4 modes.
+            Χρησιμοποιεί το MODES dict που έχεις ήδη ορίσει στο app.py.
+            """
+            t = (text or "").lower()
 
-    def _score_keywords(text: str, keywords: list[str]) -> int:
-        t = (text or "").lower()
-        return sum(1 for kw in keywords if kw in t)
+            scores = {
+                "student": _score_keywords(t, MODES["student"]["keywords"]),
+                "work": _score_keywords(t, MODES["work"]["keywords"]),
+                "sleep": _score_keywords(t, MODES["sleep"]["keywords"]),
+                "relationships": _score_keywords(t, MODES["relationships"]["keywords"]),
+            }
 
-    def detect_mode_weights(text: str, mood: int, sleep: int, water: int) -> dict:
-        """
-        Dynamic Mode Blending: weights για 4 modes.
-        Χρησιμοποιεί το MODES dict που έχεις ήδη ορίσει στο app.py.
-        """
-        t = (text or "").lower()
+            # boosts
+            for p in MODES["student"].get("linguistic_patterns", []):
+                if p in t:
+                    scores["student"] += 2
 
-        scores = {
-            "student": _score_keywords(t, MODES["student"]["keywords"]),
-            "work": _score_keywords(t, MODES["work"]["keywords"]),
-            "sleep": _score_keywords(t, MODES["sleep"]["keywords"]),
-            "relationships": _score_keywords(t, MODES["relationships"]["keywords"]),
-        }
+            if (sleep <= 6 or water <= 4) and scores["work"] > 0:
+                scores["work"] += 2
 
-        # boosts
-        for p in MODES["student"].get("linguistic_patterns", []):
-            if p in t:
-                scores["student"] += 2
+            if detect_sleep_difficulty(sleep, text):
+                scores["sleep"] += 2
 
-        if (sleep <= 6 or water <= 4) and scores["work"] > 0:
-            scores["work"] += 2
+            relational_boost = any(
+                x in t for x in ["δεν με καταλαβ", "δεν με καταλαβα", "απόρριψ", "απορριψ", "μοναξ", "τσακω", "συγκρου"]
+            )
+            if relational_boost:
+                scores["relationships"] += 2
 
-        if detect_sleep_difficulty(sleep, text):
-            scores["sleep"] += 2
+            # baseline όταν όλα 0
+            if all(v == 0 for v in scores.values()):
+                if sleep <= 6:
+                    scores["sleep"] = 2
+                elif mood <= 5:
+                    scores["student"] = 1
+                    scores["work"] = 1
+                else:
+                    scores["student"] = 1
 
-        relational_boost = any(
-            x in t for x in ["δεν με καταλαβ", "δεν με καταλαβα", "απόρριψ", "απορριψ", "μοναξ", "τσακω", "συγκρου"]
-        )
-        if relational_boost:
-            scores["relationships"] += 2
+            total = sum(scores.values())
+            weights = {k: (v / total) for k, v in scores.items()} if total else {k: 0.0 for k in scores}
 
-        # baseline όταν όλα 0
-        if all(v == 0 for v in scores.values()):
-            if sleep <= 6:
-                scores["sleep"] = 2
-            elif mood <= 5:
-                scores["student"] = 1
-                scores["work"] = 1
-            else:
-                scores["student"] = 1
+            sorted_keys = sorted(weights.keys(), key=lambda k: weights[k], reverse=True)
+            top = sorted_keys[:2]
+            for k in weights:
+                if k not in top:
+                    weights[k] *= 0.6
+            ren = sum(weights.values())
+            if ren > 0:
+                weights = {k: v / ren for k, v in weights.items()}
 
-        total = sum(scores.values())
-        weights = {k: (v / total) for k, v in scores.items()} if total else {k: 0.0 for k in scores}
+            return weights
 
-        
-        sorted_keys = sorted(weights.keys(), key=lambda k: weights[k], reverse=True)
-        top = sorted_keys[:2]
-        for k in weights:
-            if k not in top:
-                weights[k] *= 0.6
-        ren = sum(weights.values())
-        if ren > 0:
-            weights = {k: v / ren for k, v in weights.items()}
+        def choose_active_mode_from_weights(weights: dict) -> Optional[str]:
+            if not weights:
+                return None
+            best = max(weights, key=lambda k: weights[k])
+            return best if float(weights.get(best, 0.0)) >= 0.34 else None
 
-        return weights
+        def _format_mode_blend_text(weights: dict) -> str:
+            order = sorted(weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
+            return ", ".join([f"{k}={v:.2f}" for k, v in order])
 
-    def choose_active_mode_from_weights(weights: dict) -> Optional[str]:
-        if not weights:
-            return None
-        best = max(weights, key=lambda k: weights[k])
-        return best if float(weights.get(best, 0.0)) >= 0.34 else None
+        def build_llm_user_prompt(
+            raw_user_text: str,
+            mood_value: int,
+            sleep: int,
+            water: int,
+            active_mode: Optional[str],
+            mode_weights: dict,
+        ) -> str:
+            ctx = _get_dialogue_context_text(max_pairs=10)
+            summary = (st.session_state.conversation_summary or "").strip()
+            threads = st.session_state.open_threads or []
+            facts = st.session_state.facts_memory or []
 
-    def _format_mode_blend_text(weights: dict) -> str:
-        order = sorted(weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
-        return ", ".join([f"{k}={v:.2f}" for k, v in order])
+            # profile snippet
+            profile_snip_parts = []
+            for k in ["context", "main_goals", "main_struggles", "helpful_things", "preferred_tone", "triggers", "soothing_things"]:
+                v = (profile.get(k) or "").strip()
+                if v:
+                    profile_snip_parts.append(f"- {k}: {v}")
+            profile_snip = "\n".join(profile_snip_parts).strip()
 
-    def build_llm_user_prompt(
-        raw_user_text: str,
-        mood_value: int,
-        sleep: int,
-        water: int,
-        active_mode: Optional[str],
-        mode_weights: dict,
-    ) -> str:
-        ctx = _get_dialogue_context_text(max_pairs=10)
-        summary = (st.session_state.conversation_summary or "").strip()
-        threads = st.session_state.open_threads or []
-        facts = st.session_state.facts_memory or []
+            # top-2 modes
+            mode_instructions = []
+            top2 = sorted(mode_weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
+            for mode_key, w in top2:
+                label = MODES.get(mode_key, {}).get("label", mode_key)
+                mode_instructions.append(f"- {label} (weight={w:.2f})")
+            mode_text = "\n".join(mode_instructions) if mode_instructions else "- None"
 
-        # profile snippet
-        profile_snip_parts = []
-        for k in ["context", "main_goals", "main_struggles", "helpful_things", "preferred_tone", "triggers", "soothing_things"]:
-            v = (profile.get(k) or "").strip()
-            if v:
-                profile_snip_parts.append(f"- {k}: {v}")
-        profile_snip = "\n".join(profile_snip_parts).strip()
+            avoid = st.session_state.last_bot_outputs[-6:] if st.session_state.last_bot_outputs else []
 
-        # top-2 modes
-        mode_instructions = []
-        top2 = sorted(mode_weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
-        for mode_key, w in top2:
-            label = MODES.get(mode_key, {}).get("label", mode_key)
-            mode_instructions.append(f"- {label} (weight={w:.2f})")
-        mode_text = "\n".join(mode_instructions) if mode_instructions else "- None"
-
-        avoid = st.session_state.last_bot_outputs[-6:] if st.session_state.last_bot_outputs else []
-
-        prompt = f"""
+            prompt = f"""
 ΣΥΣΤΗΜΑ ΣΥΝΟΧΗΣ (Narrative Continuity Layer):
 - Διατήρησε συνοχή με βάση το ιστορικό και τη rolling memory.
 - Στόχος: φυσικός διάλογος, όχι κάθε φορά σύνοψη/χάρτης/άσκηση.
@@ -1168,434 +1160,162 @@ ANTI-REPEAT:
 ΜΗΝΥΜΑ ΧΡΗΣΤΗ:
 {raw_user_text}
 """.strip()
-        return prompt
+            return prompt
 
-    def update_narrative_memory_llm(
-        profile: dict,
-        active_mode: Optional[str],
-        mode_weights: dict,
-        user_text: str,
-        bot_text: str,
-        decision_trace: list[str],
-    ) -> None:
-        """
-        Προαιρετικό: αν έχεις llm_update_memory στο llm.py, θα ενημερώνει summary/threads/facts.
-        Αν δεν υπάρχει, δεν σπάει τίποτα.
-        """
-        try:
-            from llm import llm_update_memory
-        except Exception:
-            decision_trace.append("Narrative memory: llm_update_memory δεν βρέθηκε → skip.")
-            return
+        def update_narrative_memory_llm(
+            profile: dict,
+            active_mode: Optional[str],
+            mode_weights: dict,
+            user_text: str,
+            bot_text: str,
+            decision_trace: list[str],
+        ) -> None:
+            """
+            Προαιρετικό: αν έχεις llm_update_memory στο llm.py, θα ενημερώνει summary/threads/facts.
+            Αν δεν υπάρχει, δεν σπάει τίποτα.
+            """
+            try:
+                from llm import llm_update_memory
+            except Exception:
+                decision_trace.append("Narrative memory: llm_update_memory δεν βρέθηκε → skip.")
+                return
 
-        prev_summary = st.session_state.conversation_summary
-        prev_threads = st.session_state.open_threads
-        prev_facts = st.session_state.facts_memory
+            prev_summary = st.session_state.conversation_summary
+            prev_threads = st.session_state.open_threads
+            prev_facts = st.session_state.facts_memory
 
-        out = llm_update_memory(
-            profile=profile,
-            active_mode=active_mode or "NONE",
-            mode_weights=mode_weights,
-            prev_summary=prev_summary,
-            prev_threads=prev_threads,
-            prev_facts=prev_facts,
-            user_text=user_text,
-            bot_text=bot_text,
-        )
-        if not out:
-            decision_trace.append("Narrative memory: update failed/None → keep previous.")
-            return
-
-        st.session_state.conversation_summary = (out.get("summary") or prev_summary or "").strip()
-        st.session_state.open_threads = out.get("threads") or prev_threads or []
-        st.session_state.facts_memory = out.get("facts") or prev_facts or []
-        decision_trace.append("Narrative memory: ενημερώθηκαν summary/threads/facts.")
-
-    # --- Discreet professional-support indicator ((((non-diagnostic)))) ---
-    def compute_support_need_score(
-        text: str,
-        mood: int,
-        sleep: int,
-        water: int,
-        mode_weights: Optional[dict] = None,
-        conversation_summary: str = "",
-        open_threads: Optional[list] = None,
-    ) -> tuple[int, list[str]]:
-        t = (text or "").lower()
-        reasons: list[str] = []
-        score = 0.0
-
-        if mood <= 3:
-            score += 18; reasons.append("πολύ χαμηλή διάθεση (≤3/10)")
-        elif mood <= 5:
-            score += 10; reasons.append("χαμηλή/μέτρια διάθεση (≤5/10)")
-
-        if sleep <= 4:
-            score += 16; reasons.append("πολύ λίγος ύπνος (≤4 ώρες)")
-        elif sleep <= 6:
-            score += 9; reasons.append("λίγος ύπνος (≤6 ώρες)")
-
-        if water <= 3:
-            score += 4; reasons.append("χαμηλή ενυδάτωση (≤3 ποτήρια)")
-
-        high_burden = [
-            "δεν αντεχω", "δεν αντέχω", "κουραστηκα", "κουράστηκα",
-            "δεν παει αλλο", "δεν πάει άλλο", "ειμαι χαλια", "είμαι χάλια",
-            "απελπισ", "απόγνωση", "πανικ", "πανικό", "φοβαμαι", "φοβάμαι",
-            "μονος", "μόνος", "μοναξ", "καταρρε", "καταρρέ",
-            "δεν μπορω", "δεν μπορώ", "δεν βγαινει", "δεν βγαίνει",
-        ]
-        hit_burden = any(p in t for p in high_burden)
-        if hit_burden:
-            score += 14; reasons.append("γλωσσικά σήματα έντονου βάρους/δυσκολίας")
-
-        chronic = ["κάθε μέρα", "καθε μερα", "εδώ και", "εδω και", "μήνες", "μηνες", "εβδομάδες", "εβδομαδες", "πάντα", "παντα"]
-        if any(p in t for p in chronic):
-            score += 8; reasons.append("πιθανή διάρκεια/επιμονή")
-
-        impairment = [
-            "δεν μπορω να λειτουργησω", "δεν μπορώ να λειτουργήσω",
-            "δεν μπορω να σηκωθω", "δεν μπορώ να σηκωθώ",
-            "δεν μπορω να διαβασω", "δεν μπορώ να διαβάσω",
-            "δεν μπορω να δουλεψω", "δεν μπορώ να δουλέψω",
-            "δεν τρωω", "δεν τρώω", "δεν μπορω να φαω", "δεν μπορώ να φάω",
-        ]
-        if any(p in t for p in impairment):
-            score += 12; reasons.append("σήματα δυσκολίας λειτουργικότητας")
-
-        if mode_weights:
-            sleep_w = float(mode_weights.get("sleep", 0.0))
-            work_w = float(mode_weights.get("work", 0.0))
-            if sleep_w >= 0.45 and sleep <= 6:
-                score += 6; reasons.append("υψηλό βάρος ‘Ύπνος’ + χαμηλός ύπνος")
-            if work_w >= 0.45 and (sleep <= 6 or mood <= 5):
-                score += 5; reasons.append("υψηλό βάρος ‘Εργασία’ + κόπωση/πίεση")
-
-        threads = open_threads or []
-        if len(threads) >= 3:
-            score += 6; reasons.append("πολλά ανοιχτά θέματα (threads)")
-        if conversation_summary and len(conversation_summary) > 260:
-            score += 3; reasons.append("πλούσιο summary → πιο σύνθετο φορτίο")
-
-        if len((text or "").strip()) <= 12 and not hit_burden:
-            score -= 6
-
-        return _clamp_int(score, 0, 100), reasons
-
-    def support_need_label(score: int) -> tuple[str, str]:
-        if score <= 24:
-            return (
-                "Χαμηλή ένδειξη",
-                "Αν σε βοηθά, συνέχισε με μικρά βήματα φροντίδας. Αν επιμείνει ή δυσκολεύει την καθημερινότητα, μια συζήτηση με ειδικό μπορεί να είναι υποστηρικτική."
+            out = llm_update_memory(
+                profile=profile,
+                active_mode=active_mode or "NONE",
+                mode_weights=mode_weights,
+                prev_summary=prev_summary,
+                prev_threads=prev_threads,
+                prev_facts=prev_facts,
+                user_text=user_text,
+                bot_text=bot_text,
             )
-        if score <= 49:
-            return (
-                "Μέτρια ένδειξη",
-                "Αν αυτό συνεχίζεται ή σε δυσκολεύει λειτουργικά, θα μπορούσε να βοηθήσει μια συζήτηση με ψυχολόγο, έστω για 1–2 συνεδρίες διερεύνησης."
-            )
-        if score <= 69:
-            return (
-                "Αυξημένη ένδειξη",
-                "Με βάση αυτά που γράφεις και το check-in, φαίνεται ότι θα άξιζε επαγγελματική υποστήριξη σύντομα — όχι επειδή “κάτι πάει λάθος”, αλλά για να μην το σηκώνεις μόνος/η."
-            )
-        return (
-            "Υψηλή ένδειξη",
-            "Αυτό ακούγεται αρκετά βαρύ. Αν μπορείς, θα ήταν καλό να μιλήσεις με επαγγελματία μέσα στις επόμενες μέρες. Αν νιώσεις κίνδυνο για την ασφάλειά σου, χρησιμοποίησε άμεσα τις γραμμές βοήθειας."
-        )
+            if not out:
+                decision_trace.append("Narrative memory: update failed/None → keep previous.")
+                return
 
-    def run_wrapup_bundle(
-        mood_value: int,
-        sleep: int,
-        water: int,
-        last_user_text: str,
-        profile: dict,
-        active_mode: Optional[str],
-        mode_weights: dict,
-        decision_trace: list[str],
-    ) -> None:
-        wrap_raw = (
-            "Κλείσε τον διάλογο ήρεμα.\n"
-            "Δώσε:\n"
-            "1) 4–7 προτάσεις με συμπεράσματα/μοτίβα που εμφανίστηκαν,\n"
-            "2) 2 πολύ μικρά, εφαρμόσιμα βήματα για 24 ώρες,\n"
-            "3) 1 φράση κλεισίματος.\n"
-            "Χωρίς διάγνωση, χωρίς «πρέπει»."
-        )
+            st.session_state.conversation_summary = (out.get("summary") or prev_summary or "").strip()
+            st.session_state.open_threads = out.get("threads") or prev_threads or []
+            st.session_state.facts_memory = out.get("facts") or prev_facts or []
+            decision_trace.append("Narrative memory: ενημερώθηκαν summary/threads/facts.")
 
-        wrap_prompt = build_llm_user_prompt(
-            raw_user_text=wrap_raw,
-            mood_value=mood_value,
-            sleep=sleep,
-            water=water,
-            active_mode=active_mode,
-            mode_weights=mode_weights,
-        )
+        # --- Discreet professional-support indicator ((((non-diagnostic)))) ---
+        def compute_support_need_score(
+            text: str,
+            mood: int,
+            sleep: int,
+            water: int,
+            mode_weights: Optional[dict] = None,
+            conversation_summary: str = "",
+            open_threads: Optional[list] = None,
+        ) -> tuple[int, list[str]]:
+            t = (text or "").lower()
+            reasons: list[str] = []
+            score = 0.0
 
-        closing = llm_therapeutic_reply(
-            mood=mood_value,
-            sleep=sleep,
-            water=water,
-            user_text=wrap_prompt,
-            profile=profile,
-            active_mode=active_mode,
-        )
+            if mood <= 3:
+                score += 18; reasons.append("πολύ χαμηλή διάθεση (≤3/10)")
+            elif mood <= 5:
+                score += 10; reasons.append("χαμηλή/μέτρια διάθεση (≤5/10)")
 
-        if closing:
-            closing = _safe_trim(closing, 1500)
-            st.session_state.messages.append(("bot", closing))
-            remember_bot_output(closing)
-            decision_trace.append("Wrap-up: LLM συμπεράσματα/βήματα/κλείσιμο.")
-        else:
-            rb = "Σε ευχαριστώ που το μοιράστηκες. Κράτα ένα μικρό βήμα φροντίδας για σήμερα και πήγαινε απαλά."
-            st.session_state.messages.append(("bot", rb))
-            remember_bot_output(rb)
-            decision_trace.append("Wrap-up: fallback κλείσιμο (LLM None).")
+            if sleep <= 4:
+                score += 16; reasons.append("πολύ λίγος ύπνος (≤4 ώρες)")
+            elif sleep <= 6:
+                score += 9; reasons.append("λίγος ύπνος (≤6 ώρες)")
 
-        map_html = render_emotional_map(mood_value, sleep, water, last_user_text)
-        st.session_state.messages.append(("map", map_html))
-        decision_trace.append("Wrap-up: συναισθηματικός χάρτης.")
+            if water <= 3:
+                score += 4; reasons.append("χαμηλή ενυδάτωση (≤3 ποτήρια)")
 
-        ex = exercise_suggestion(mood_value, sleep, water, last_user_text)
-        st.session_state.messages.append(("exercise", ex))
-        decision_trace.append("Wrap-up: άσκηση ημέρας.")
+            high_burden = [
+                "δεν αντεχω", "δεν αντέχω", "κουραστηκα", "κουράστηκα",
+                "δεν παει αλλο", "δεν πάει άλλο", "ειμαι χαλια", "είμαι χάλια",
+                "απελπισ", "απόγνωση", "πανικ", "πανικό", "φοβαμαι", "φοβάμαι",
+                "μονος", "μόνος", "μοναξ", "καταρρε", "καταρρέ",
+                "δεν μπορω", "δεν μπορώ", "δεν βγαινει", "δεν βγαίνει",
+            ]
+            hit_burden = any(p in t for p in high_burden)
+            if hit_burden:
+                score += 14; reasons.append("γλωσσικά σήματα έντονου βάρους/δυσκολίας")
 
-        ex_low = (ex or "").lower()
-        if "διάλεξε" in ex_low and "λέξη" in ex_low:
-            st.session_state.exercise_followup = True
-            decision_trace.append("Wrap-up: άσκηση λέξης → follow-up ενεργό.")
+            chronic = ["κάθε μέρα", "καθε μερα", "εδώ και", "εδω και", "μήνες", "μηνες", "εβδομάδες", "εβδομαδες", "πάντα", "παντα"]
+            if any(p in t for p in chronic):
+                score += 8; reasons.append("πιθανή διάρκεια/επιμονή")
 
-    # ============================================================
-    # Session state init + load persisted
-    # ============================================================
-    if "chat_loaded_for_user" not in st.session_state:
-        st.session_state.chat_loaded_for_user = {}
+            impairment = [
+                "δεν μπορω να λειτουργησω", "δεν μπορώ να λειτουργήσω",
+                "δεν μπορω να σηκωθω", "δεν μπορώ να σηκωθώ",
+                "δεν μπορω να διαβασω", "δεν μπορώ να διαβάσω",
+                "δεν μπορω να δουλεψω", "δεν μπορώ να δουλέψω",
+                "δεν τρωω", "δεν τρώω", "δεν μπορω να φαω", "δεν μπορώ να φάω",
+            ]
+            if any(p in t for p in impairment):
+                score += 12; reasons.append("σήματα δυσκολίας λειτουργικότητας")
 
-    ukey = _user_key()
-    if not st.session_state.chat_loaded_for_user.get(ukey, False):
-        persisted = _load_persisted_chat_state()
+            if mode_weights:
+                sleep_w = float(mode_weights.get("sleep", 0.0))
+                work_w = float(mode_weights.get("work", 0.0))
+                if sleep_w >= 0.45 and sleep <= 6:
+                    score += 6; reasons.append("υψηλό βάρος ‘Ύπνος’ + χαμηλός ύπνος")
+                if work_w >= 0.45 and (sleep <= 6 or mood <= 5):
+                    score += 5; reasons.append("υψηλό βάρος ‘Εργασία’ + κόπωση/πίεση")
 
-        st.session_state.messages = persisted.get("messages", st.session_state.get("messages", [])) or []
-        st.session_state.dialogue_active = persisted.get("dialogue_active", False)
-        st.session_state.dialogue_turns = int(persisted.get("dialogue_turns", 0) or 0)
-        st.session_state.wrapup_done = persisted.get("wrapup_done", False)
+            threads = open_threads or []
+            if len(threads) >= 3:
+                score += 6; reasons.append("πολλά ανοιχτά θέματα (threads)")
+            if conversation_summary and len(conversation_summary) > 260:
+                score += 3; reasons.append("πλούσιο summary → πιο σύνθετο φορτίο")
 
-        st.session_state.conversation_summary = persisted.get("conversation_summary", "") or ""
-        st.session_state.open_threads = persisted.get("open_threads", []) or []
-        st.session_state.facts_memory = persisted.get("facts_memory", []) or []
+            if len((text or "").strip()) <= 12 and not hit_burden:
+                score -= 6
 
-        st.session_state.last_bot_outputs = persisted.get("last_bot_outputs", []) or []
-        st.session_state.last_checkin = persisted.get("last_checkin", {}) or {}
-        st.session_state.exercise_followup = persisted.get("exercise_followup", False)
+            return _clamp_int(score, 0, 100), reasons
 
-        st.session_state.support_indicator_history = persisted.get("support_indicator_history", []) or []
-
-        st.session_state.chat_loaded_for_user[ukey] = True
-
-    # Defaults if missing
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "exercise_followup" not in st.session_state:
-        st.session_state.exercise_followup = False
-    if "last_decision_trace" not in st.session_state:
-        st.session_state.last_decision_trace = []
-    if "last_checkin" not in st.session_state:
-        st.session_state.last_checkin = {}
-    if "dialogue_active" not in st.session_state:
-        st.session_state.dialogue_active = False
-    if "dialogue_turns" not in st.session_state:
-        st.session_state.dialogue_turns = 0
-    if "wrapup_done" not in st.session_state:
-        st.session_state.wrapup_done = False
-
-    if "conversation_summary" not in st.session_state:
-        st.session_state.conversation_summary = ""
-    if "open_threads" not in st.session_state:
-        st.session_state.open_threads = []
-    if "facts_memory" not in st.session_state:
-        st.session_state.facts_memory = []
-    if "last_bot_outputs" not in st.session_state:
-        st.session_state.last_bot_outputs = []
-
-    if "support_indicator_history" not in st.session_state:
-        st.session_state.support_indicator_history = []
-
-    # ============================================================
-    # UI
-    # ============================================================
-    st.markdown(
-        """
-        <style>
-        .pink-metrics-row{display:flex; gap:14px; flex-wrap:wrap; margin: 8px 0 14px 0;}
-        .pink-metric{
-            width: 118px; height: 118px; border-radius: 999px;
-            background: rgba(255, 105, 180, 0.14);
-            border: 1px solid rgba(255, 105, 180, 0.28);
-            display:flex; flex-direction:column; align-items:center; justify-content:center;
-            box-shadow: 0 6px 20px rgba(255,105,180,0.08);
-        }
-        .pink-metric .v{font-size: 26px; font-weight: 800; color:#4A3D73; line-height: 1;}
-        .pink-metric .t{font-size: 12.5px; font-weight:700; color:#6C5A9E; margin-top:6px;}
-        .pink-metric .p{font-size: 12px; color:#6C5A9E; margin-top:2px;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown('<div class="main-wrapper"><div class="chat-card">', unsafe_allow_html=True)
-
-    st.markdown("#### 😊 Πώς είσαι σήμερα;")
-
-    colA, colB, colC = st.columns(3)
-    with colA:
-        mood_value = st.slider("Διάθεση (1–10)", 1, 10, 5, 1, key="chat_mood")
-    with colB:
-        sleep = st.slider("Ύπνος (ώρες, 1–10)", 1, 10, 7, 1, key="chat_sleep")
-    with colC:
-        water = st.slider("Νερό (ποτήρια, 1–15)", 1, 15, 6, 1, key="chat_water")
-
-    mood_pct = int(round((mood_value / 10.0) * 100))
-    sleep_pct = int(round((sleep / 10.0) * 100))
-    water_pct = int(round((water / 15.0) * 100))
-
-    st.markdown(
-        f"""
-        <div class="pink-metrics-row">
-          <div class="pink-metric">
-            <div class="v">{mood_value}/10</div>
-            <div class="t">Διάθεση</div>
-            <div class="p">{mood_pct}%</div>
-          </div>
-          <div class="pink-metric">
-            <div class="v">{sleep}h</div>
-            <div class="t">Ύπνος</div>
-            <div class="p">{sleep_pct}%</div>
-          </div>
-          <div class="pink-metric">
-            <div class="v">{water}</div>
-            <div class="t">Νερό</div>
-            <div class="p">{water_pct}%</div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    user_text = st.text_area("📝 Γράψε μου ό,τι θέλεις για τη μέρα σου:", height=120, key="chat_text")
-
-    # ============================================================
-    # SEND
-    # ============================================================
-    if st.button("Αποστολή", key="chat_send"):
-        text = (user_text or "").strip()
-        if not text:
-            st.warning("Γράψε κάτι μικρό πριν πατήσεις αποστολή ")
-        else:
-            decision_trace: list[str] = []
-            decision_trace.append(f"Check-in: mood={mood_value}/10 ({mood_pct}%), sleep={sleep} ({sleep_pct}%), water={water} ({water_pct}%).")
-
-            # 1) Emergency gate 
-            if is_emergency(text):
-                decision_trace.append("Emergency gate: ενεργοποίηση ειδικού μηνύματος.")
-                emergency_html = emergency_message()
-                st.session_state.messages.append(("emergency", emergency_html))
-
-                user_email = st.session_state.get("user_email", "")
-                log_user_data("EMERGENCY", "-", "-", text, email=user_email)
-
-                st.session_state.last_decision_trace = decision_trace
-
-                # persist
-                _save_persisted_chat_state({
-                    "messages": st.session_state.messages,
-                    "dialogue_active": st.session_state.dialogue_active,
-                    "dialogue_turns": st.session_state.dialogue_turns,
-                    "wrapup_done": st.session_state.wrapup_done,
-                    "conversation_summary": st.session_state.conversation_summary,
-                    "open_threads": st.session_state.open_threads,
-                    "facts_memory": st.session_state.facts_memory,
-                    "last_bot_outputs": st.session_state.last_bot_outputs,
-                    "last_checkin": st.session_state.last_checkin,
-                    "exercise_followup": st.session_state.exercise_followup,
-                    "support_indicator_history": st.session_state.support_indicator_history,
-                })
-                st.rerun()
-
-            # 2) Append user message
-            st.session_state.messages.append(("user", text))
-
-            # 3) Mode blending
-            mode_weights = detect_mode_weights(text, mood_value, sleep, water)
-            active_mode = choose_active_mode_from_weights(mode_weights)
-            decision_trace.append(f"Mode blending: {_format_mode_blend_text(mode_weights)}.")
-            decision_trace.append(f"Active mode: {active_mode or 'NONE'}.")
-
-            # 4) Follow-up 
-            if st.session_state.get("exercise_followup", False):
-                decision_trace.append("Exercise follow-up: λέξη.")
-                ctx = st.session_state.get("last_checkin", {})
-
-                followup = llm_exercise_followup(
-                    chosen_word=text,
-                    mood_value=ctx.get("mood", mood_value),
-                    sleep=ctx.get("sleep", sleep),
-                    water=ctx.get("water", water),
-                    last_text=ctx.get("text", ""),
-                    profile=profile,
-                    active_mode=active_mode,
+        def support_need_label(score: int) -> tuple[str, str]:
+            if score <= 24:
+                return (
+                    "Χαμηλή ένδειξη",
+                    "Αν σε βοηθά, συνέχισε με μικρά βήματα φροντίδας. Αν επιμείνει ή δυσκολεύει την καθημερινότητα, μια συζήτηση με ειδικό μπορεί να είναι υποστηρικτική."
                 )
-                if followup:
-                    followup = _safe_trim(followup, 900)
-                    st.session_state.messages.append(("bot", followup))
-                    remember_bot_output(followup)
-                    decision_trace.append("Exercise follow-up: LLM reply.")
-                else:
-                    rb = "Σε ακούω. Θες να μου πεις λίγα παραπάνω για το τι σημαίνει αυτή η λέξη για σένα;"
-                    st.session_state.messages.append(("bot", rb))
-                    remember_bot_output(rb)
-                    decision_trace.append("Exercise follow-up: fallback (LLM None).")
+            if score <= 49:
+                return (
+                    "Μέτρια ένδειξη",
+                    "Αν αυτό συνεχίζεται ή σε δυσκολεύει λειτουργικά, θα μπορούσε να βοηθήσει μια συζήτηση με ψυχολόγο, έστω για 1–2 συνεδρίες διερεύνησης."
+                )
+            if score <= 69:
+                return (
+                    "Αυξημένη ένδειξη",
+                    "Με βάση αυτά που γράφεις και το check-in, φαίνεται ότι θα άξιζε επαγγελματική υποστήριξη σύντομα — όχι επειδή “κάτι πάει λάθος”, αλλά για να μην το σηκώνεις μόνος/η."
+                )
+            return (
+                "Υψηλή ένδειξη",
+                "Αυτό ακούγεται αρκετά βαρύ. Αν μπορείς, θα ήταν καλό να μιλήσεις με επαγγελματία μέσα στις επόμενες μέρες. Αν νιώσεις κίνδυνο για την ασφάλειά σου, χρησιμοποίησε άμεσα τις γραμμές βοήθειας."
+            )
 
-                st.session_state.exercise_followup = False
-                st.session_state.last_decision_trace = decision_trace
+        def run_wrapup_bundle(
+            mood_value: int,
+            sleep: int,
+            water: int,
+            last_user_text: str,
+            profile: dict,
+            active_mode: Optional[str],
+            mode_weights: dict,
+            decision_trace: list[str],
+        ) -> None:
+            wrap_raw = (
+                "Κλείσε τον διάλογο ήρεμα.\n"
+                "Δώσε:\n"
+                "1) 4–7 προτάσεις με συμπεράσματα/μοτίβα που εμφανίστηκαν,\n"
+                "2) 2 πολύ μικρά, εφαρμόσιμα βήματα για 24 ώρες,\n"
+                "3) 1 φράση κλεισίματος.\n"
+                "Χωρίς διάγνωση, χωρίς «πρέπει»."
+            )
 
-                _save_persisted_chat_state({
-                    "messages": st.session_state.messages,
-                    "dialogue_active": st.session_state.dialogue_active,
-                    "dialogue_turns": st.session_state.dialogue_turns,
-                    "wrapup_done": st.session_state.wrapup_done,
-                    "conversation_summary": st.session_state.conversation_summary,
-                    "open_threads": st.session_state.open_threads,
-                    "facts_memory": st.session_state.facts_memory,
-                    "last_bot_outputs": st.session_state.last_bot_outputs,
-                    "last_checkin": st.session_state.last_checkin,
-                    "exercise_followup": st.session_state.exercise_followup,
-                    "support_indicator_history": st.session_state.support_indicator_history,
-                })
-                st.rerun()
-
-            # 5) Rule-based opening μόνο στην αρχή νέου διαλόγου IMPORTANT
-            if (not st.session_state.dialogue_active) or (st.session_state.dialogue_turns == 0):
-                st.session_state.dialogue_active = True
-                st.session_state.wrapup_done = False
-                st.session_state.dialogue_turns = 0
-
-                rb_open = personal_reply(mood_value, sleep, water)
-                st.session_state.messages.append(("bot", rb_open))
-                remember_bot_output(rb_open)
-                decision_trace.append("Open: personal_reply (μόνο 1η φορά).")
-
-                if user_says_feels_ok(text) and looks_a_bit_strained(mood_value, sleep, water):
-                    gentle = (
-                        "Σημειώνω ότι λες πως είσαι καλά, και αυτό μετράει.\n\n"
-                        f"Ταυτόχρονα (διάθεση {mood_value}/10, ύπνος {sleep}, νερό {water}) μοιάζει να υπάρχει λίγη κούραση από κάτω. "
-                        "Ας το πάμε ήπια."
-                    )
-                    st.session_state.messages.append(("bot", gentle))
-                    remember_bot_output(gentle)
-                    decision_trace.append("Open: gentle mismatch note (ok + strained).")
-
-            # 6) LLM dialogue reply 
-            prompt = build_llm_user_prompt(
-                raw_user_text=text,
+            wrap_prompt = build_llm_user_prompt(
+                raw_user_text=wrap_raw,
                 mood_value=mood_value,
                 sleep=sleep,
                 water=water,
@@ -1603,156 +1323,428 @@ ANTI-REPEAT:
                 mode_weights=mode_weights,
             )
 
-            llm_out = llm_therapeutic_reply(
+            closing = llm_therapeutic_reply(
                 mood=mood_value,
                 sleep=sleep,
                 water=water,
-                user_text=prompt,
+                user_text=wrap_prompt,
                 profile=profile,
                 active_mode=active_mode,
             )
 
-            if llm_out:
-                llm_out = _safe_trim(llm_out, 1400)
-                st.session_state.messages.append(("bot", llm_out))
-                remember_bot_output(llm_out)
-                decision_trace.append("Dialogue: LLM reply (continuity+blending).")
-
-                update_narrative_memory_llm(
-                    profile=profile,
-                    active_mode=active_mode,
-                    mode_weights=mode_weights,
-                    user_text=text,
-                    bot_text=llm_out,
-                    decision_trace=decision_trace,
-                )
+            if closing:
+                closing = _safe_trim(closing, 1500)
+                st.session_state.messages.append(("bot", closing))
+                remember_bot_output(closing)
+                decision_trace.append("Wrap-up: LLM συμπεράσματα/βήματα/κλείσιμο.")
             else:
-                rb = fallback_therapeutic_reply(mood_value, sleep, water, text)
+                rb = "Σε ευχαριστώ που το μοιράστηκες. Κράτα ένα μικρό βήμα φροντίδας για σήμερα και πήγαινε απαλά."
                 st.session_state.messages.append(("bot", rb))
                 remember_bot_output(rb)
-                decision_trace.append("Dialogue: fallback rule-based (LLM None).")
+                decision_trace.append("Wrap-up: fallback κλείσιμο (LLM None).")
 
-            st.session_state.dialogue_turns += 1
+            map_html = render_emotional_map(mood_value, sleep, water, last_user_text)
+            st.session_state.messages.append(("map", map_html))
+            decision_trace.append("Wrap-up: συναισθηματικός χάρτης.")
 
-            # 7) Discreet “support” indicator (non-diagnostic)
-            score, score_reasons = compute_support_need_score(
-                text=text,
-                mood=mood_value,
-                sleep=sleep,
-                water=water,
-                mode_weights=mode_weights,
-                conversation_summary=st.session_state.get("conversation_summary", ""),
-                open_threads=st.session_state.get("open_threads", []),
-            )
-            label, suggestion = support_need_label(score)
+            ex = exercise_suggestion(mood_value, sleep, water, last_user_text)
+            st.session_state.messages.append(("exercise", ex))
+            decision_trace.append("Wrap-up: άσκηση ημέρας.")
 
-            if score >= 35:
-                hint = (
-                    f"**Δείκτης προτεινόμενης υποστήριξης:** {score}/100 · *{label}*\n\n"
-                    f"{suggestion}"
-                )
-                st.session_state.messages.append(("support_hint", hint))
-                decision_trace.append(f"Support indicator: {score}/100 ({label}).")
-                if score_reasons:
-                    decision_trace.append("Support reasons: " + ", ".join(score_reasons[:4]) + ("…" if len(score_reasons) > 4 else ""))
+            ex_low = (ex or "").lower()
+            if "διάλεξε" in ex_low and "λέξη" in ex_low:
+                st.session_state.exercise_followup = True
+                decision_trace.append("Wrap-up: άσκηση λέξης → follow-up ενεργό.")
+
+        # ============================================================
+        # Session state init + load persisted
+        # ============================================================
+        if "chat_loaded_for_user" not in st.session_state:
+            st.session_state.chat_loaded_for_user = {}
+
+        ukey = _user_key()
+        if not st.session_state.chat_loaded_for_user.get(ukey, False):
+            persisted = _load_persisted_chat_state()
+
+            st.session_state.messages = persisted.get("messages", st.session_state.get("messages", [])) or []
+            st.session_state.dialogue_active = persisted.get("dialogue_active", False)
+            st.session_state.dialogue_turns = int(persisted.get("dialogue_turns", 0) or 0)
+            st.session_state.wrapup_done = persisted.get("wrapup_done", False)
+
+            st.session_state.conversation_summary = persisted.get("conversation_summary", "") or ""
+            st.session_state.open_threads = persisted.get("open_threads", []) or []
+            st.session_state.facts_memory = persisted.get("facts_memory", []) or []
+
+            st.session_state.last_bot_outputs = persisted.get("last_bot_outputs", []) or []
+            st.session_state.last_checkin = persisted.get("last_checkin", {}) or {}
+            st.session_state.exercise_followup = persisted.get("exercise_followup", False)
+
+            st.session_state.support_indicator_history = persisted.get("support_indicator_history", []) or []
+
+            st.session_state.chat_loaded_for_user[ukey] = True
+
+        # Defaults if missing
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+        if "exercise_followup" not in st.session_state:
+            st.session_state.exercise_followup = False
+        if "last_decision_trace" not in st.session_state:
+            st.session_state.last_decision_trace = []
+        if "last_checkin" not in st.session_state:
+            st.session_state.last_checkin = {}
+        if "dialogue_active" not in st.session_state:
+            st.session_state.dialogue_active = False
+        if "dialogue_turns" not in st.session_state:
+            st.session_state.dialogue_turns = 0
+        if "wrapup_done" not in st.session_state:
+            st.session_state.wrapup_done = False
+
+        if "conversation_summary" not in st.session_state:
+            st.session_state.conversation_summary = ""
+        if "open_threads" not in st.session_state:
+            st.session_state.open_threads = []
+        if "facts_memory" not in st.session_state:
+            st.session_state.facts_memory = []
+        if "last_bot_outputs" not in st.session_state:
+            st.session_state.last_bot_outputs = []
+
+        if "support_indicator_history" not in st.session_state:
+            st.session_state.support_indicator_history = []
+
+        # ============================================================
+        # UI
+        # ============================================================
+        st.markdown(
+            """
+            <style>
+            .pink-metrics-row{display:flex; gap:14px; flex-wrap:wrap; margin: 8px 0 14px 0;}
+            .pink-metric{
+                width: 118px; height: 118px; border-radius: 999px;
+                background: rgba(255, 105, 180, 0.14);
+                border: 1px solid rgba(255, 105, 180, 0.28);
+                display:flex; flex-direction:column; align-items:center; justify-content:center;
+                box-shadow: 0 6px 20px rgba(255,105,180,0.08);
+            }
+            .pink-metric .v{font-size: 26px; font-weight: 800; color:#4A3D73; line-height: 1;}
+            .pink-metric .t{font-size: 12.5px; font-weight:700; color:#6C5A9E; margin-top:6px;}
+            .pink-metric .p{font-size: 12px; color:#6C5A9E; margin-top:2px;}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div class="main-wrapper"><div class="chat-card">', unsafe_allow_html=True)
+
+        st.markdown("#### 😊 Πώς είσαι σήμερα;")
+
+        colA, colB, colC = st.columns(3)
+        with colA:
+            mood_value = st.slider("Διάθεση (1–10)", 1, 10, 5, 1, key="chat_mood")
+        with colB:
+            sleep = st.slider("Ύπνος (ώρες, 1–10)", 1, 10, 7, 1, key="chat_sleep")
+        with colC:
+            water = st.slider("Νερό (ποτήρια, 1–15)", 1, 15, 6, 1, key="chat_water")
+
+        mood_pct = int(round((mood_value / 10.0) * 100))
+        sleep_pct = int(round((sleep / 10.0) * 100))
+        water_pct = int(round((water / 15.0) * 100))
+
+        st.markdown(
+            f"""
+            <div class="pink-metrics-row">
+              <div class="pink-metric">
+                <div class="v">{mood_value}/10</div>
+                <div class="t">Διάθεση</div>
+                <div class="p">{mood_pct}%</div>
+              </div>
+              <div class="pink-metric">
+                <div class="v">{sleep}h</div>
+                <div class="t">Ύπνος</div>
+                <div class="p">{sleep_pct}%</div>
+              </div>
+              <div class="pink-metric">
+                <div class="v">{water}</div>
+                <div class="t">Νερό</div>
+                <div class="p">{water_pct}%</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        user_text = st.text_area("📝 Γράψε μου ό,τι θέλεις για τη μέρα σου:", height=120, key="chat_text")
+
+        # ============================================================
+        # SEND
+        # ============================================================
+        if st.button("Αποστολή", key="chat_send"):
+            text = (user_text or "").strip()
+            if not text:
+                st.warning("Γράψε κάτι μικρό πριν πατήσεις αποστολή ")
             else:
-                decision_trace.append(f"Support indicator: {score}/100 (no display; below threshold).")
+                decision_trace: list[str] = []
+                decision_trace.append(f"Check-in: mood={mood_value}/10 ({mood_pct}%), sleep={sleep} ({sleep_pct}%), water={water} ({water_pct}%).")
 
-            st.session_state.support_indicator_history.append(
-                {"score": score, "label": label, "mood": mood_value, "sleep": sleep, "water": water, "ts": datetime.now().isoformat(timespec="seconds")}
-            )
-            st.session_state.support_indicator_history = st.session_state.support_indicator_history[-30:]
+                # 1) Emergency gate 
+                if is_emergency(text):
+                    decision_trace.append("Emergency gate: ενεργοποίηση ειδικού μηνύματος.")
+                    emergency_html = emergency_message()
+                    st.session_state.messages.append(("emergency", emergency_html))
 
-            # 8) Closure → Wrap-up bundle (μία φορά)
-            closing_now = _detect_dialogue_closure(text)
-            if closing_now and not st.session_state.wrapup_done:
-                decision_trace.append("Closure detected: run wrap-up bundle.")
-                run_wrapup_bundle(
+                    user_email = st.session_state.get("user_email", "")
+                    log_user_data("EMERGENCY", "-", "-", text, email=user_email)
+
+                    st.session_state.last_decision_trace = decision_trace
+
+                    # persist
+                    _save_persisted_chat_state({
+                        "messages": st.session_state.messages,
+                        "dialogue_active": st.session_state.dialogue_active,
+                        "dialogue_turns": st.session_state.dialogue_turns,
+                        "wrapup_done": st.session_state.wrapup_done,
+                        "conversation_summary": st.session_state.conversation_summary,
+                        "open_threads": st.session_state.open_threads,
+                        "facts_memory": st.session_state.facts_memory,
+                        "last_bot_outputs": st.session_state.last_bot_outputs,
+                        "last_checkin": st.session_state.last_checkin,
+                        "exercise_followup": st.session_state.exercise_followup,
+                        "support_indicator_history": st.session_state.support_indicator_history,
+                    })
+                    st.rerun()
+
+                # 2) Append user message
+                st.session_state.messages.append(("user", text))
+
+                # 3) Mode blending
+                mode_weights = detect_mode_weights(text, mood_value, sleep, water)
+                active_mode = choose_active_mode_from_weights(mode_weights)
+                decision_trace.append(f"Mode blending: {_format_mode_blend_text(mode_weights)}.")
+                decision_trace.append(f"Active mode: {active_mode or 'NONE'}.")
+
+                # 4) Follow-up 
+                if st.session_state.get("exercise_followup", False):
+                    decision_trace.append("Exercise follow-up: λέξη.")
+                    ctx = st.session_state.get("last_checkin", {})
+
+                    followup = llm_exercise_followup(
+                        chosen_word=text,
+                        mood_value=ctx.get("mood", mood_value),
+                        sleep=ctx.get("sleep", sleep),
+                        water=ctx.get("water", water),
+                        last_text=ctx.get("text", ""),
+                        profile=profile,
+                        active_mode=active_mode,
+                    )
+                    if followup:
+                        followup = _safe_trim(followup, 900)
+                        st.session_state.messages.append(("bot", followup))
+                        remember_bot_output(followup)
+                        decision_trace.append("Exercise follow-up: LLM reply.")
+                    else:
+                        rb = "Σε ακούω. Θες να μου πεις λίγα παραπάνω για το τι σημαίνει αυτή η λέξη για σένα;"
+                        st.session_state.messages.append(("bot", rb))
+                        remember_bot_output(rb)
+                        decision_trace.append("Exercise follow-up: fallback (LLM None).")
+
+                    st.session_state.exercise_followup = False
+                    st.session_state.last_decision_trace = decision_trace
+
+                    _save_persisted_chat_state({
+                        "messages": st.session_state.messages,
+                        "dialogue_active": st.session_state.dialogue_active,
+                        "dialogue_turns": st.session_state.dialogue_turns,
+                        "wrapup_done": st.session_state.wrapup_done,
+                        "conversation_summary": st.session_state.conversation_summary,
+                        "open_threads": st.session_state.open_threads,
+                        "facts_memory": st.session_state.facts_memory,
+                        "last_bot_outputs": st.session_state.last_bot_outputs,
+                        "last_checkin": st.session_state.last_checkin,
+                        "exercise_followup": st.session_state.exercise_followup,
+                        "support_indicator_history": st.session_state.support_indicator_history,
+                    })
+                    st.rerun()
+
+                # 5) Rule-based opening μόνο στην αρχή νέου διαλόγου IMPORTANT
+                if (not st.session_state.dialogue_active) or (st.session_state.dialogue_turns == 0):
+                    st.session_state.dialogue_active = True
+                    st.session_state.wrapup_done = False
+                    st.session_state.dialogue_turns = 0
+
+                    rb_open = personal_reply(mood_value, sleep, water)
+                    st.session_state.messages.append(("bot", rb_open))
+                    remember_bot_output(rb_open)
+                    decision_trace.append("Open: personal_reply (μόνο 1η φορά).")
+
+                    if user_says_feels_ok(text) and looks_a_bit_strained(mood_value, sleep, water):
+                        gentle = (
+                            "Σημειώνω ότι λες πως είσαι καλά, και αυτό μετράει.\n\n"
+                            f"Ταυτόχρονα (διάθεση {mood_value}/10, ύπνος {sleep}, νερό {water}) μοιάζει να υπάρχει λίγη κούραση από κάτω. "
+                            "Ας το πάμε ήπια."
+                        )
+                        st.session_state.messages.append(("bot", gentle))
+                        remember_bot_output(gentle)
+                        decision_trace.append("Open: gentle mismatch note (ok + strained).")
+
+                # 6) LLM dialogue reply 
+                prompt = build_llm_user_prompt(
+                    raw_user_text=text,
                     mood_value=mood_value,
                     sleep=sleep,
                     water=water,
-                    last_user_text=text,
-                    profile=profile,
                     active_mode=active_mode,
                     mode_weights=mode_weights,
-                    decision_trace=decision_trace,
                 )
-                st.session_state.wrapup_done = True
 
-            # 9) Logging (CSV)
-            user_email = st.session_state.get("user_email", "")
-            log_user_data(mood_value, sleep, water, text, email=user_email)
-            decision_trace.append("Logging: saved to CSV.")
+                llm_out = llm_therapeutic_reply(
+                    mood=mood_value,
+                    sleep=sleep,
+                    water=water,
+                    user_text=prompt,
+                    profile=profile,
+                    active_mode=active_mode,
+                )
 
-            # 10) last_checkin
-            st.session_state.last_checkin = {
-                "mood": mood_value,
-                "sleep": sleep,
-                "water": water,
-                "text": text,
-                "active_mode": active_mode,
-                "mode_weights": mode_weights,
-            }
+                if llm_out:
+                    llm_out = _safe_trim(llm_out, 1400)
+                    st.session_state.messages.append(("bot", llm_out))
+                    remember_bot_output(llm_out)
+                    decision_trace.append("Dialogue: LLM reply (continuity+blending).")
 
-            st.session_state.last_decision_trace = decision_trace
+                    update_narrative_memory_llm(
+                        profile=profile,
+                        active_mode=active_mode,
+                        mode_weights=mode_weights,
+                        user_text=text,
+                        bot_text=llm_out,
+                        decision_trace=decision_trace,
+                    )
+                else:
+                    rb = fallback_therapeutic_reply(mood_value, sleep, water, text)
+                    st.session_state.messages.append(("bot", rb))
+                    remember_bot_output(rb)
+                    decision_trace.append("Dialogue: fallback rule-based (LLM None).")
 
-            # 11) Persist per-user state
-            _save_persisted_chat_state({
-                "messages": st.session_state.messages,
-                "dialogue_active": st.session_state.dialogue_active,
-                "dialogue_turns": st.session_state.dialogue_turns,
-                "wrapup_done": st.session_state.wrapup_done,
-                "conversation_summary": st.session_state.conversation_summary,
-                "open_threads": st.session_state.open_threads,
-                "facts_memory": st.session_state.facts_memory,
-                "last_bot_outputs": st.session_state.last_bot_outputs,
-                "last_checkin": st.session_state.last_checkin,
-                "exercise_followup": st.session_state.exercise_followup,
-                "support_indicator_history": st.session_state.support_indicator_history,
-            })
+                st.session_state.dialogue_turns += 1
 
-            st.rerun()
+                # 7) Discreet “support” indicator (non-diagnostic)
+                score, score_reasons = compute_support_need_score(
+                    text=text,
+                    mood=mood_value,
+                    sleep=sleep,
+                    water=water,
+                    mode_weights=mode_weights,
+                    conversation_summary=st.session_state.get("conversation_summary", ""),
+                    open_threads=st.session_state.get("open_threads", []),
+                )
+                label, suggestion = support_need_label(score)
 
-    # ============================================================
-    # RENDER CHAT HISTORY
-    # ============================================================
-    for sender, content in st.session_state.messages:
-        if sender == "user":
-            render_message("user", content)
-        elif sender == "bot":
-            render_message("bot", content)
-        elif sender == "exercise":
-            render_exercise_card(content)
-        elif sender == "map":
-            st.markdown(f"<div class='emotional-map-card'>{content}</div>", unsafe_allow_html=True)
-        elif sender == "emergency":
-            render_emergency_block(content)
-        elif sender == "plan":
-            render_action_plan_card(content)
-        elif sender == "support_hint":
-           
-            render_message("bot", content)
+                if score >= 35:
+                    hint = (
+                        f"**Δείκτης προτεινόμενης υποστήριξης:** {score}/100 · *{label}*\n\n"
+                        f"{suggestion}"
+                    )
+                    st.session_state.messages.append(("support_hint", hint))
+                    decision_trace.append(f"Support indicator: {score}/100 ({label}).")
+                    if score_reasons:
+                        decision_trace.append("Support reasons: " + ", ".join(score_reasons[:4]) + ("…" if len(score_reasons) > 4 else ""))
+                else:
+                    decision_trace.append(f"Support indicator: {score}/100 (no display; below threshold).")
 
-    # ============================================================
-    # Explainable layer 
-    # ============================================================
-    if st.session_state.get("last_decision_trace"):
-        with st.expander("ℹ️ Explainable layer (τι έγινε σε αυτό το turn)"):
-            for item in st.session_state.last_decision_trace:
-                st.markdown(f"- {item}")
+                st.session_state.support_indicator_history.append(
+                    {"score": score, "label": label, "mood": mood_value, "sleep": sleep, "water": water, "ts": datetime.now().isoformat(timespec="seconds")}
+                )
+                st.session_state.support_indicator_history = st.session_state.support_indicator_history[-30:]
 
-    st.markdown(
-        """
-        <p class="footer-disclaimer">
-          Το Project Wellness είναι εργαλείο αυτοβοήθειας και ψυχοεκπαιδευτικού χαρακτήρα.
-          Δεν αντικαθιστά ψυχολόγο, ψυχίατρο ή υπηρεσίες έκτακτης ανάγκης.
-          Αν βρίσκεσαι σε κίνδυνο, κάλεσε το 112 ή τη Γραμμή Παρέμβασης 1018.
-        </p>
-        """,
-        unsafe_allow_html=True,
-    )
+                # 8) Closure → Wrap-up bundle (μία φορά)
+                closing_now = _detect_dialogue_closure(text)
+                if closing_now and not st.session_state.wrapup_done:
+                    decision_trace.append("Closure detected: run wrap-up bundle.")
+                    run_wrapup_bundle(
+                        mood_value=mood_value,
+                        sleep=sleep,
+                        water=water,
+                        last_user_text=text,
+                        profile=profile,
+                        active_mode=active_mode,
+                        mode_weights=mode_weights,
+                        decision_trace=decision_trace,
+                    )
+                    st.session_state.wrapup_done = True
 
-    st.markdown("</div></div>", unsafe_allow_html=True)  # chat-card + main-wrapper
+                # 9) Logging (CSV)
+                user_email = st.session_state.get("user_email", "")
+                log_user_data(mood_value, sleep, water, text, email=user_email)
+                decision_trace.append("Logging: saved to CSV.")
+
+                # 10) last_checkin
+                st.session_state.last_checkin = {
+                    "mood": mood_value,
+                    "sleep": sleep,
+                    "water": water,
+                    "text": text,
+                    "active_mode": active_mode,
+                    "mode_weights": mode_weights,
+                }
+
+                st.session_state.last_decision_trace = decision_trace
+
+                # 11) Persist per-user state
+                _save_persisted_chat_state({
+                    "messages": st.session_state.messages,
+                    "dialogue_active": st.session_state.dialogue_active,
+                    "dialogue_turns": st.session_state.dialogue_turns,
+                    "wrapup_done": st.session_state.wrapup_done,
+                    "conversation_summary": st.session_state.conversation_summary,
+                    "open_threads": st.session_state.open_threads,
+                    "facts_memory": st.session_state.facts_memory,
+                    "last_bot_outputs": st.session_state.last_bot_outputs,
+                    "last_checkin": st.session_state.last_checkin,
+                    "exercise_followup": st.session_state.exercise_followup,
+                    "support_indicator_history": st.session_state.support_indicator_history,
+                })
+
+                st.rerun()
+
+        # ============================================================
+        # RENDER CHAT HISTORY
+        # ============================================================
+        for sender, content in st.session_state.messages:
+            if sender == "user":
+                render_message("user", content)
+            elif sender == "bot":
+                render_message("bot", content)
+            elif sender == "exercise":
+                render_exercise_card(content)
+            elif sender == "map":
+                st.markdown(f"<div class='emotional-map-card'>{content}</div>", unsafe_allow_html=True)
+            elif sender == "emergency":
+                render_emergency_block(content)
+            elif sender == "plan":
+                render_action_plan_card(content)
+            elif sender == "support_hint":
+                
+                render_message("bot", content)
+
+        # ============================================================
+        # Explainable layer 
+        # ============================================================
+        if st.session_state.get("last_decision_trace"):
+            with st.expander("ℹ️ Explainable layer (τι έγινε σε αυτό το turn)"):
+                for item in st.session_state.last_decision_trace:
+                    st.markdown(f"- {item}")
+
+        st.markdown(
+            """
+            <p class="footer-disclaimer">
+              Το Project Wellness είναι εργαλείο αυτοβοήθειας και ψυχοεκπαιδευτικού χαρακτήρα.
+              Δεν αντικαθιστά ψυχολόγο, ψυχίατρο ή υπηρεσίες έκτακτης ανάγκης.
+              Αν βρίσκεσαι σε κίνδυνο, κάλεσε το 112 ή τη Γραμμή Παρέμβασης 1018.
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("</div></div>", unsafe_allow_html=True)  # chat-card + main-wrapper
 
 
 # ============================================================
@@ -1783,7 +1775,6 @@ with tab_history:
 
     if not os.path.exists(csv_path):
         st.info("Δεν υπάρχουν ακόμη καταγραφές. Κάνε πρώτα ένα check-in στην καρτέλα «Chat».")
-        st.markdown("</div>", unsafe_allow_html=True)
     else:
         try:
             df = pd.read_csv(csv_path)
@@ -1795,49 +1786,40 @@ with tab_history:
 
         if df is None or df.empty:
             st.info("Το αρχείο καταγραφών είναι άδειο. Κάνε ένα πρώτο check-in στην καρτέλα «Chat».")
-            st.markdown("</div>", unsafe_allow_html=True)
         else:
             # 3) Κανονικοποίηση στηλών 
-            #  ιδανικά: timestamp, mood, sleep, water, message, email
             colmap = {c.lower().strip(): c for c in df.columns}
 
             def _col(name: str) -> str | None:
                 return colmap.get(name)
 
-            # Αν δεν υπάρχει "message" αλλά υπάρχει "text" ή "user_text"
             if _col("message") is None:
                 if _col("text") is not None:
                     df.rename(columns={_col("text"): "message"}, inplace=True)
                 elif _col("user_text") is not None:
                     df.rename(columns={_col("user_text"): "message"}, inplace=True)
 
-            # Αν δεν υπάρχει "timestamp" αλλά υπάρχει "time" / "date"
             if _col("timestamp") is None:
                 if _col("time") is not None:
                     df.rename(columns={_col("time"): "timestamp"}, inplace=True)
                 elif _col("date") is not None:
                     df.rename(columns={_col("date"): "timestamp"}, inplace=True)
 
-            # Αν δεν υπάρχει "email" αλλά υπάρχει "user_email"
             if _col("email") is None and _col("user_email") is not None:
                 df.rename(columns={_col("user_email"): "email"}, inplace=True)
 
-            # 4) Timestamp parse 
             if "timestamp" in df.columns:
                 df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
 
-            # 5) Filtering με email 
             current_email = (st.session_state.get("user_email", "") or "").strip().lower()
             df_all = df.copy()
 
             if "email" in df.columns and current_email:
-                # normalise emails
                 df["email"] = df["email"].astype(str).str.strip().str.lower()
                 df_user = df[df["email"] == current_email].copy()
             else:
                 df_user = df.copy()
 
-            
             if df_user.empty:
                 st.warning(
                     "Δεν βρέθηκαν εγγραφές για αυτόν τον λογαριασμό. "
@@ -1846,78 +1828,71 @@ with tab_history:
                 show_all = st.checkbox("Δείξε όλες τις εγγραφές (χωρίς φιλτράρισμα)", value=False)
                 if show_all:
                     df_user = df_all.copy()
+
+            if not df_user.empty:
+                st.markdown("### 🪪 Πρόσφατες καταγραφές")
+                st.caption("Κάρτες με διάθεση, ύπνο, νερό και το μήνυμά σου κάθε φορά.")
+
+                if "timestamp" in df_user.columns and not df_user["timestamp"].isna().all():
+                    df_user = df_user.sort_values("timestamp", ascending=False).head(60)
                 else:
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    st.stop()
+                    df_user = df_user.iloc[::-1].head(60)
 
-            # 6) Ταξινόμηση + περιορισμός
-            st.markdown("### 🪪 Πρόσφατες καταγραφές")
-            st.caption("Κάρτες με διάθεση, ύπνο, νερό και το μήνυμά σου κάθε φορά.")
+                for _, row in df_user.iterrows():
+                    ts = row.get("timestamp", "")
+                    if pd.notna(ts) and str(ts).strip():
+                        try:
+                            ts_str = pd.to_datetime(ts).strftime("%d/%m/%Y, %H:%M")
+                        except Exception:
+                            ts_str = str(ts)
+                    else:
+                        ts_str = "-"
 
-            if "timestamp" in df_user.columns and not df_user["timestamp"].isna().all():
-                df_user = df_user.sort_values("timestamp", ascending=False).head(60)
-            else:
-                df_user = df_user.iloc[::-1].head(60)
+                    mood = row.get("mood", "")
+                    sleep = row.get("sleep", "")
+                    water = row.get("water", "")
+                    raw_msg = str(row.get("message", "") or "")
 
-            # 7) Render cards
-            for _, row in df_user.iterrows():
-                ts = row.get("timestamp", "")
-                if pd.notna(ts) and str(ts).strip():
+                    msg_no_tags = re.sub(r"<[^>]+>", "", raw_msg)
+                    msg_clean = html.unescape(msg_no_tags).strip()
+                    if len(msg_clean) > 260:
+                        msg_clean = msg_clean[:260].rstrip() + "…"
+                    short_msg_html = html.escape(msg_clean)
+
                     try:
-                        ts_str = pd.to_datetime(ts).strftime("%d/%m/%Y, %H:%M")
-                    except Exception:
-                        ts_str = str(ts)
-                else:
-                    ts_str = "-"
+                        mood_val = float(mood)
+                    except (TypeError, ValueError):
+                        mood_val = None
 
-                mood = row.get("mood", "")
-                sleep = row.get("sleep", "")
-                water = row.get("water", "")
-                raw_msg = str(row.get("message", "") or "")
+                    if mood_val is None:
+                        mood_class = "mood-neutral"
+                    elif mood_val <= 4:
+                        mood_class = "mood-low"
+                    elif mood_val <= 7:
+                        mood_class = "mood-mid"
+                    else:
+                        mood_class = "mood-high"
 
-            
-                msg_no_tags = re.sub(r"<[^>]+>", "", raw_msg)
-                msg_clean = html.unescape(msg_no_tags).strip()
-                if len(msg_clean) > 260:
-                    msg_clean = msg_clean[:260].rstrip() + "…"
-                short_msg_html = html.escape(msg_clean)
+                    card_html = f"""
+                    <div class="history-card">
+                      <div class="history-card-header">
+                        <span class="history-date">🕒 {ts_str}</span>
+                        <span class="history-mood-pill {mood_class}">Διάθεση: {mood}/10</span>
+                      </div>
+                      <div class="history-meta-row">
+                        <span class="history-chip">😴 Ύπνος: {sleep} ώρες</span>
+                        <span class="history-chip">💧 Νερό: {water} ποτήρια</span>
+                      </div>
+                      <div class="history-message">«{short_msg_html}»</div>
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
 
-                # mood pill color
-                try:
-                    mood_val = float(mood)
-                except (TypeError, ValueError):
-                    mood_val = None
-
-                if mood_val is None:
-                    mood_class = "mood-neutral"
-                elif mood_val <= 4:
-                    mood_class = "mood-low"
-                elif mood_val <= 7:
-                    mood_class = "mood-mid"
-                else:
-                    mood_class = "mood-high"
-
-                card_html = f"""
-                <div class="history-card">
-                  <div class="history-card-header">
-                    <span class="history-date">🕒 {ts_str}</span>
-                    <span class="history-mood-pill {mood_class}">Διάθεση: {mood}/10</span>
-                  </div>
-                  <div class="history-meta-row">
-                    <span class="history-chip">😴 Ύπνος: {sleep} ώρες</span>
-                    <span class="history-chip">💧 Νερό: {water} ποτήρια</span>
-                  </div>
-                  <div class="history-message">«{short_msg_html}»</div>
-                </div>
-                """
-                st.markdown(card_html, unsafe_allow_html=True)
-
-            # 8) Μικρό sanity check για columns 
-            with st.expander("📌 Στήλες που βρέθηκαν στο CSV", expanded=False):
-                st.write(list(df_all.columns))
-                st.write("Σύνολο εγγραφών:", len(df_all))
-                if "email" in df_all.columns and current_email:
-                    st.write("Εγγραφές για το email σου:", int((df_all["email"].astype(str).str.lower().str.strip() == current_email).sum()))
+                with st.expander("📌 Στήλες που βρέθηκαν στο CSV", expanded=False):
+                    st.write(list(df_all.columns))
+                    st.write("Σύνολο εγγραφών:", len(df_all))
+                    if "email" in df_all.columns and current_email:
+                        st.write("Εγγραφές για το email σου:", int((df_all["email"].astype(str).str.lower().str.strip() == current_email).sum()))
 
     st.markdown("</div>", unsafe_allow_html=True)
 
