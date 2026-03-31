@@ -25,15 +25,40 @@ from components import (
     render_emergency_block,
     render_action_plan_card,
 )
-from data_logger import log_user_data
-# Η νέα, 100% ιδιωτική διαχείριση του προφίλ στη μνήμη του browser
+============================================================
+# ΠΡΟΣΩΠΙΚΟ ΠΡΟΦΙΛ ΧΡΗΣΤΗ (ΜΟΝΙΜΗ ΑΠΟΘΗΚΕΥΣΗ ΒΑΣΕΙ EMAIL)
+# ============================================================
+def _get_profile_path():
+    # Βρίσκουμε ποιος χρήστης είναι συνδεδεμένος
+    email = (st.session_state.get("user_email") or "").strip().lower()
+    if not email:
+        email = (st.session_state.get("user_name") or "anon").strip().lower()
+    key = email or "anon"
+    
+    # Φτιάχνουμε ένα μοναδικό, κρυφό όνομα αρχείου (π.χ. profile_a7b9c.json)
+    h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    base_dir = os.path.dirname(__file__)
+    return os.path.join(base_dir, f"profile_{h}.json")
+
 def load_profile():
-    if "user_profile" not in st.session_state:
-        st.session_state.user_profile = {}
-    return st.session_state.user_profile
+    # Διαβάζει το προφίλ από το προσωπικό αρχείο του χρήστη (αν υπάρχει)
+    path = _get_profile_path()
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+    return {}
 
 def save_profile(new_profile):
-    st.session_state.user_profile = new_profile
+    # Αποθηκεύει το προφίλ μόνιμα στο προσωπικό αρχείο
+    path = _get_profile_path()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(new_profile, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 # ============================================================
