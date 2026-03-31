@@ -1595,17 +1595,19 @@ ANTI-REPEAT:
                     })
                     st.rerun()
 
-                # 5) Rule-based opening μόνο στην αρχή νέου διαλόγου IMPORTANT
+                # 5) Rule-based opening (ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΟ ΤΟ ΛΑΘΟΣ ΜΗΝΥΜΑ, ΚΡΑΤΑΜΕ ΜΟΝΟ ΤΗΝ ΑΡΧΙΚΟΠΟΙΗΣΗ)
                 if (not st.session_state.dialogue_active) or (st.session_state.dialogue_turns == 0):
                     st.session_state.dialogue_active = True
                     st.session_state.wrapup_done = False
                     st.session_state.dialogue_turns = 0
 
-                    rb_open = personal_reply(mood_value, sleep, water)
-                    st.session_state.messages.append(("bot", rb_open))
-                    remember_bot_output(rb_open)
-                    decision_trace.append("Open: personal_reply (μόνο 1η φορά).")
+                    # Το παρακάτω είναι πλέον σε σχόλιο για να μην βγάζει τα λάθος "rule based" μηνύματα:
+                    # rb_open = personal_reply(mood_value, sleep, water)
+                    # st.session_state.messages.append(("bot", rb_open))
+                    # remember_bot_output(rb_open)
+                    # decision_trace.append("Open: personal_reply (μόνο 1η φορά).")
 
+                    # Το "gentle" παραμένει ενεργό αν ο χρήστης πει ότι είναι καλά αλλά τα νούμερα λένε κάτι άλλο
                     if user_says_feels_ok(text) and looks_a_bit_strained(mood_value, sleep, water):
                         gentle = (
                             "Σημειώνω ότι λες πως είσαι καλά, και αυτό μετράει.\n\n"
