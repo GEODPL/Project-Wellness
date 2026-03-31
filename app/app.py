@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Tuple, List
 import streamlit as st
 import pandas as pd
 import qrcode
+from data_logger import log_user_data
 from PIL import Image
 
 from llm import llm_therapeutic_reply, llm_exercise_followup
