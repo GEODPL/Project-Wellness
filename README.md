@@ -30,6 +30,18 @@ Most chatbot wrappers rely on simple "Sliding Window" history or basic RAG, lead
 * **Inference Engine:** OpenAI API (GPT-4o-mini)
 * **Design Pattern:** Separation of Concerns (UI, State Manager, and LLM orchestration are strictly decoupled).
 
+Install dependencies:
+**Bash**
+pip install -r requirements.txt
+
+3. **Set your API Key:**
+   Create a `.env` file or use Streamlit secrets to add your OpenAI API Key:
+   ```env
+   OPENAI_API_KEY="your-api-key-here"
+
+4. **Run the application:**
+   streamlit run app.py
+
 ---
 
 ##  Quick Start / Run Locally
