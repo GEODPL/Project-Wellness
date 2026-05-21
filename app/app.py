@@ -4,6 +4,7 @@ import html
 import socket
 from io import BytesIO
 from typing import Dict, Any, Optional, Tuple, List
+import streamlit.components.v1 as components
 
 import streamlit as st
 import pandas as pd
@@ -26,9 +27,13 @@ from components import (
     render_emergency_block,
     render_action_plan_card,
 )
+import json
+import hashlib
+from datetime import datetime
+
 #============================================================
-# ΠΡΟΣΩΠΙΚΟ ΠΡΟΦΙΛ ΧΡΗΣΤΗ (ΜΟΝΙΜΗ ΑΠΟΘΗΚΕΥΣΗ ΒΑΣΕΙ EMAIL)
-# ============================================================
+# ΠΡΟΣΩΠΙΚΟ ΠΡΟΦΙΛ ΧΡΗΣΤΗ 
+# ===========================================================
 def _get_profile_path():
     # Βρίσκουμε ποιος χρήστης είναι συνδεδεμένος
     email = (st.session_state.get("user_email") or "").strip().lower()
@@ -921,11 +926,8 @@ tabs = st.tabs(
 # ============================================================
 # CHAT TAB 
 # ============================================================
-
+   
 with tab_chat:
-    import json
-    import hashlib
-    from datetime import datetime
 
     profile = load_profile()
 
@@ -1457,7 +1459,6 @@ ANTI-REPEAT:
 
         st.markdown('<div class="main-wrapper"><div class="chat-card">', unsafe_allow_html=True)
 
-        # === ΕΔΩ ΕΙΝΑΙ ΤΟ ΝΕΟ ΚΟΥΜΠΙ ΝΕΑΣ ΣΥΝΟΜΙΛΙΑΣ ===
         col_title, col_btn = st.columns([3, 1])
         with col_title:
             st.markdown("#### 😊 Πώς είσαι σήμερα;")
@@ -1492,49 +1493,74 @@ ANTI-REPEAT:
                 })
                 
                 st.rerun()
-        # === ΤΕΛΟΣ ΝΕΟΥ ΚΟΥΜΠΙΟΥ ===
 
-        colA, colB, colC = st.columns(3)
-        with colA:
-            mood_value = st.slider("Διάθεση (1–10)", 1, 10, 5, 1, key="chat_mood")
-        with colB:
-            sleep = st.slider("Ύπνος (ώρες, 1–10)", 1, 10, 7, 1, key="chat_sleep")
-        with colC:
-            water = st.slider("Νερό (ποτήρια, 1–15)", 1, 15, 6, 1, key="chat_water")
+        # ΜΕΤΑΦΟΡΑ SLIDERS ΜΕΣΑ ΣΕ EXPANDER
+        with st.expander("📊 Σημερινό Check-in (Διάθεση, Ύπνος, Νερό)", expanded=True):
+            colA, colB, colC = st.columns(3)
+            with colA:
+                mood_value = st.slider("Διάθεση (1–10)", 1, 10, 5, 1, key="chat_mood")
+            with colB:
+                sleep = st.slider("Ύπνος (ώρες, 1–10)", 1, 10, 7, 1, key="chat_sleep")
+            with colC:
+                water = st.slider("Νερό (ποτήρια, 1–15)", 1, 15, 6, 1, key="chat_water")
 
-        mood_pct = int(round((mood_value / 10.0) * 100))
-        sleep_pct = int(round((sleep / 10.0) * 100))
-        water_pct = int(round((water / 15.0) * 100))
+            mood_pct = int(round((mood_value / 10.0) * 100))
+            sleep_pct = int(round((sleep / 10.0) * 100))
+            water_pct = int(round((water / 15.0) * 100))
 
-        st.markdown(
-            f"""
-            <div class="pink-metrics-row">
-              <div class="pink-metric">
-                <div class="v">{mood_value}/10</div>
-                <div class="t">Διάθεση</div>
-                <div class="p">{mood_pct}%</div>
-              </div>
-              <div class="pink-metric">
-                <div class="v">{sleep}h</div>
-                <div class="t">Ύπνος</div>
-                <div class="p">{sleep_pct}%</div>
-              </div>
-              <div class="pink-metric">
-                <div class="v">{water}</div>
-                <div class="t">Νερό</div>
-                <div class="p">{water_pct}%</div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            st.markdown(
+                f"""
+                <div class="pink-metrics-row">
+                  <div class="pink-metric">
+                    <div class="v">{mood_value}/10</div>
+                    <div class="t">Διάθεση</div>
+                    <div class="p">{mood_pct}%</div>
+                  </div>
+                  <div class="pink-metric">
+                    <div class="v">{sleep}h</div>
+                    <div class="t">Ύπνος</div>
+                    <div class="p">{sleep_pct}%</div>
+                  </div>
+                  <div class="pink-metric">
+                    <div class="v">{water}</div>
+                    <div class="t">Νερό</div>
+                    <div class="p">{water_pct}%</div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-        user_text = st.text_area("📝 Γράψε μου ό,τι θέλεις για τη μέρα σου:", height=120, key="chat_text")
+        # RENDER CHAT HISTORY ΕΔΩ ΠΑΝΩ! 
+        for sender, content in st.session_state.messages:
+            if sender == "user":
+                render_message("user", content)
+            elif sender == "bot":
+                render_message("bot", content)
+            elif sender == "exercise":
+                render_exercise_card(content)
+            elif sender == "map":
+                st.markdown(f"<div class='emotional-map-card'>{content}</div>", unsafe_allow_html=True)
+            elif sender == "emergency":
+                render_emergency_block(content)
+            elif sender == "plan":
+                render_action_plan_card(content)
+            elif sender == "support_hint":
+                render_message("bot", content)
+
+        if st.session_state.get("last_decision_trace"):
+            with st.expander("ℹ️ Explainable layer (τι έγινε σε αυτό το turn)"):
+                for item in st.session_state.last_decision_trace:
+                    st.markdown(f"- {item}")
+
+
+        # ST.CHAT_INPUT ΜΟΝΙΜΑ ΣΤΟ ΚΑΤΩ ΜΕΡΟΣ
+        user_text = st.chat_input("📝 Γράψε μου ό,τι θέλεις για τη μέρα σου:")
 
         # ============================================================
         # SEND
         # ============================================================
-        if st.button("Αποστολή", key="chat_send"):
+        if user_text:
             text = (user_text or "").strip()
             if not text:
                 st.warning("Γράψε κάτι μικρό πριν πατήσεις αποστολή ")
@@ -1621,19 +1647,12 @@ ANTI-REPEAT:
                     })
                     st.rerun()
 
-                # 5) Rule-based opening (ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΟ ΤΟ ΛΑΘΟΣ ΜΗΝΥΜΑ, ΚΡΑΤΑΜΕ ΜΟΝΟ ΤΗΝ ΑΡΧΙΚΟΠΟΙΗΣΗ)
+                # 5) Rule-based opening 
                 if (not st.session_state.dialogue_active) or (st.session_state.dialogue_turns == 0):
                     st.session_state.dialogue_active = True
                     st.session_state.wrapup_done = False
                     st.session_state.dialogue_turns = 0
 
-                    # Το παρακάτω είναι πλέον σε σχόλιο για να μην βγάζει τα λάθος "rule based" μηνύματα:
-                    # rb_open = personal_reply(mood_value, sleep, water)
-                    # st.session_state.messages.append(("bot", rb_open))
-                    # remember_bot_output(rb_open)
-                    # decision_trace.append("Open: personal_reply (μόνο 1η φορά).")
-
-                    # Το "gentle" παραμένει ενεργό αν ο χρήστης πει ότι είναι καλά αλλά τα νούμερα λένε κάτι άλλο
                     if user_says_feels_ok(text) and looks_a_bit_strained(mood_value, sleep, water):
                         gentle = (
                             "Σημειώνω ότι λες πως είσαι καλά, και αυτό μετράει.\n\n"
@@ -1685,7 +1704,7 @@ ANTI-REPEAT:
 
                 st.session_state.dialogue_turns += 1
 
-                # 7) Discreet “support” indicator (non-diagnostic)
+                # 7) Discreet “support” indicator 
                 score, score_reasons = compute_support_need_score(
                     text=text,
                     mood=mood_value,
@@ -1714,7 +1733,7 @@ ANTI-REPEAT:
                 )
                 st.session_state.support_indicator_history = st.session_state.support_indicator_history[-30:]
 
-                # 8) Closure → Wrap-up bundle (μία φορά)
+                # 8) Closure → Wrap-up bundle 
                 closing_now = _detect_dialogue_closure(text)
                 if closing_now and not st.session_state.wrapup_done:
                     decision_trace.append("Closure detected: run wrap-up bundle.")
@@ -1730,7 +1749,7 @@ ANTI-REPEAT:
                     )
                     st.session_state.wrapup_done = True
 
-                # 9) Logging (CSV)
+                # 9) Logging
                 user_email = st.session_state.get("user_email", "")
                 log_user_data(mood_value, sleep, water, text, email=user_email)
                 decision_trace.append("Logging: saved to CSV.")
@@ -1764,34 +1783,6 @@ ANTI-REPEAT:
 
                 st.rerun()
 
-        # ============================================================
-        # RENDER CHAT HISTORY
-        # ============================================================
-        for sender, content in st.session_state.messages:
-            if sender == "user":
-                render_message("user", content)
-            elif sender == "bot":
-                render_message("bot", content)
-            elif sender == "exercise":
-                render_exercise_card(content)
-            elif sender == "map":
-                st.markdown(f"<div class='emotional-map-card'>{content}</div>", unsafe_allow_html=True)
-            elif sender == "emergency":
-                render_emergency_block(content)
-            elif sender == "plan":
-                render_action_plan_card(content)
-            elif sender == "support_hint":
-                
-                render_message("bot", content)
-
-        # ============================================================
-        # Explainable layer 
-        # ============================================================
-        if st.session_state.get("last_decision_trace"):
-            with st.expander("ℹ️ Explainable layer (τι έγινε σε αυτό το turn)"):
-                for item in st.session_state.last_decision_trace:
-                    st.markdown(f"- {item}")
-
         st.markdown(
             """
             <p class="footer-disclaimer">
@@ -1803,11 +1794,15 @@ ANTI-REPEAT:
             unsafe_allow_html=True,
         )
 
-        st.markdown("</div></div>", unsafe_allow_html=True)  # chat-card + main-wrapper
+        st.markdown("</div></div>", unsafe_allow_html=True) 
 
 
 # ============================================================
 # ΙΣΤΟΡΙΚΟ TAB 
+# ============================================================
+
+# ============================================================
+# ΙΣΤΟΡΙΚΟ TAB (Interactive Glass Timeline)
 # ============================================================
 
 with tab_history:
@@ -1821,16 +1816,8 @@ with tab_history:
         unsafe_allow_html=True,
     )
 
-    st.markdown("<div class='main-wrapper'>", unsafe_allow_html=True)
-
     # 1) Εντοπίζουμε το CSV 
     csv_path = os.path.join(os.path.dirname(__file__), "..", "user_data.csv")
-
-    # μικρό debug panel
-    with st.expander("🛠️ Debug (αν είναι άδειο)", expanded=False):
-        st.write("CSV path:", csv_path)
-        st.write("Υπάρχει αρχείο;", os.path.exists(csv_path))
-        st.write("Τρέχον email:", st.session_state.get("user_email", ""))
 
     if not os.path.exists(csv_path):
         st.info("Δεν υπάρχουν ακόμη καταγραφές. Κάνε πρώτα ένα check-in στην καρτέλα «Chat».")
@@ -1848,7 +1835,6 @@ with tab_history:
         else:
             # 3) Κανονικοποίηση στηλών 
             colmap = {c.lower().strip(): c for c in df.columns}
-
             def _col(name: str) -> str | None:
                 return colmap.get(name)
 
@@ -1871,8 +1857,7 @@ with tab_history:
                 df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
 
             current_email = (st.session_state.get("user_email", "") or "").strip().lower()
-            df_all = df.copy()
-
+            
             if "email" in df.columns and current_email:
                 df["email"] = df["email"].astype(str).str.strip().str.lower()
                 df_user = df[df["email"] == current_email].copy()
@@ -1880,131 +1865,266 @@ with tab_history:
                 df_user = df.copy()
 
             if df_user.empty:
-                st.warning(
-                    "Δεν βρέθηκαν εγγραφές για αυτόν τον λογαριασμό. "
-                    "Αυτό συνήθως σημαίνει ότι το email δεν γράφτηκε σωστά στο CSV ή άλλαξε format."
-                )
-                show_all = st.checkbox("Δείξε όλες τις εγγραφές (χωρίς φιλτράρισμα)", value=False)
-                if show_all:
-                    df_user = df_all.copy()
-
-            if not df_user.empty:
-                st.markdown("### 🪪 Πρόσφατες καταγραφές")
-                st.caption("Κάρτες με διάθεση, ύπνο, νερό και το μήνυμά σου κάθε φορά.")
-
+                st.warning("Δεν βρέθηκαν εγγραφές για αυτόν τον λογαριασμό.")
+            else:
+                st.markdown("### 🪪 Το Χρονολόγιό σου")
+                
+                # Ταξινόμηση ώστε τα πιο πρόσφατα να είναι πάνω
                 if "timestamp" in df_user.columns and not df_user["timestamp"].isna().all():
                     df_user = df_user.sort_values("timestamp", ascending=False).head(60)
                 else:
                     df_user = df_user.iloc[::-1].head(60)
 
+                # Ετοιμάζουμε τα δεδομένα για να τα περάσουμε στη Javascript
+                timeline_data = []
                 for _, row in df_user.iterrows():
                     ts = row.get("timestamp", "")
                     if pd.notna(ts) and str(ts).strip():
                         try:
-                            ts_str = pd.to_datetime(ts).strftime("%d/%m/%Y, %H:%M")
+                            # Μορφοποίηση ημερομηνίας πιο κομψά (π.χ. 15 May 2026 • 20:30)
+                            ts_str = pd.to_datetime(ts).strftime("%d %b %Y • %H:%M")
                         except Exception:
                             ts_str = str(ts)
                     else:
                         ts_str = "-"
-
-                    mood = row.get("mood", "")
-                    sleep = row.get("sleep", "")
-                    water = row.get("water", "")
+                        
+                    mood = row.get("mood", 5)
+                    sleep = row.get("sleep", 0)
+                    water = row.get("water", 0)
                     raw_msg = str(row.get("message", "") or "")
-
+                    
+                    # Καθαρισμός HTML tags για ασφάλεια
                     msg_no_tags = re.sub(r"<[^>]+>", "", raw_msg)
                     msg_clean = html.unescape(msg_no_tags).strip()
-                    if len(msg_clean) > 260:
-                        msg_clean = msg_clean[:260].rstrip() + "…"
-                    short_msg_html = html.escape(msg_clean)
-
+                    
                     try:
                         mood_val = float(mood)
-                    except (TypeError, ValueError):
-                        mood_val = None
-
-                    if mood_val is None:
-                        mood_class = "mood-neutral"
-                    elif mood_val <= 4:
-                        mood_class = "mood-low"
+                    except:
+                        mood_val = 5.0
+                        
+                    # Καθορισμός χρωμάτων και emojis βάσει της διάθεσης
+                    if mood_val <= 4:
+                        mood_emoji = "🌧️"
+                        mood_color = "#ff8fa3" # Κόκκινο/Ροζ
                     elif mood_val <= 7:
-                        mood_class = "mood-mid"
+                        mood_emoji = "⛅"
+                        mood_color = "#ffd08a" # Πορτοκαλί/Κίτρινο
                     else:
-                        mood_class = "mood-high"
+                        mood_emoji = "☀️"
+                        mood_color = "#baf7c3" # Απαλό Πράσινο
+                        
+                    timeline_data.append({
+                        "date": ts_str,
+                        "mood": mood,
+                        "sleep": sleep,
+                        "water": water,
+                        "message": msg_clean,
+                        "emoji": mood_emoji,
+                        "color": mood_color
+                    })
+                    
+                # Μετατροπή της λίστας σε JSON string για να το διαβάσει η JS
+                timeline_json = json.dumps(timeline_data, ensure_ascii=False)
+                
+                # Το υπερ-ρεαλιστικό Timeline (HTML / CSS / JavaScript)
+                components.html(f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600;700&display=swap" rel="stylesheet">
+                    <style>
+                        body {{
+                            margin: 0; padding: 20px 10px; 
+                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                            background: transparent;
+                        }}
+                        /* Η κεντρική γραμμή του Timeline */
+                        .timeline {{
+                            position: relative;
+                            max-width: 850px;
+                            margin: 0 auto;
+                            padding-left: 50px; /* Χώρος για τη γραμμή και τα εικονίδια */
+                        }}
+                        .timeline::before {{
+                            content: '';
+                            position: absolute;
+                            left: 19px;
+                            top: 10px;
+                            bottom: 0;
+                            width: 3px;
+                            background: rgba(212, 190, 250, 0.4); /* Λιλά γραμμή */
+                            border-radius: 4px;
+                        }}
+                        /* Κάθε κάρτα/καταγραφή */
+                        .item {{
+                            position: relative;
+                            margin-bottom: 35px;
+                            opacity: 0; /* Αρχικά κρυμμένο για το animation */
+                            transform: translateY(40px);
+                            animation: slideUp 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+                        }}
+                        @keyframes slideUp {{
+                            to {{ opacity: 1; transform: translateY(0); }}
+                        }}
+                        /* Το κυκλικό εικονίδιο πάνω στη γραμμή */
+                        .icon {{
+                            position: absolute;
+                            left: -53px;
+                            top: 0;
+                            width: 44px;
+                            height: 44px;
+                            border-radius: 50%;
+                            background: rgba(255, 255, 255, 0.8);
+                            backdrop-filter: blur(10px);
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            font-size: 20px;
+                            box-shadow: 0 6px 15px rgba(108, 90, 158, 0.12);
+                            z-index: 1;
+                            border: 3px solid; /* Το χρώμα μπαίνει δυναμικά από τη JS */
+                            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+                        }}
+                        .item:hover .icon {{
+                            transform: scale(1.2) rotate(-10deg);
+                            box-shadow: 0 8px 20px rgba(108, 90, 158, 0.25);
+                        }}
+                        /* Η γυάλινη κάρτα (Glassmorphism) */
+                        .card {{
+                            background: rgba(255, 255, 255, 0.45);
+                            backdrop-filter: blur(24px);
+                            -webkit-backdrop-filter: blur(24px);
+                            border: 1px solid rgba(255, 255, 255, 0.7);
+                            border-radius: 20px;
+                            padding: 22px;
+                            box-shadow: 0 12px 35px rgba(108, 90, 158, 0.05);
+                            transition: all 0.3s ease;
+                        }}
+                        .item:hover .card {{
+                            transform: translateY(-4px);
+                            box-shadow: 0 18px 45px rgba(108, 90, 158, 0.12);
+                            background: rgba(255, 255, 255, 0.6);
+                        }}
+                        .header {{
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            margin-bottom: 15px;
+                            border-bottom: 1px solid rgba(183, 157, 242, 0.25);
+                            padding-bottom: 10px;
+                        }}
+                        .date {{
+                            font-weight: 600;
+                            font-size: 14.5px;
+                            color: #73658a;
+                        }}
+                        .metrics {{
+                            display: flex;
+                            gap: 10px;
+                            flex-wrap: wrap;
+                        }}
+                        .badge {{
+                            padding: 5px 12px;
+                            border-radius: 20px;
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            color: #4A3D73;
+                            background: rgba(255, 255, 255, 0.6);
+                            border: 1px solid rgba(255, 255, 255, 0.9);
+                            box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+                        }}
+                        .message {{
+                            font-size: 15.5px;
+                            line-height: 1.6;
+                            color: #3b304c;
+                            font-style: italic;
+                            word-wrap: break-word;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <div class="timeline" id="timelineContainer"></div>
+                    
+                    <script>
+                        // Παίρνουμε τα δεδομένα από την Python
+                        const data = {timeline_json};
+                        const container = document.getElementById('timelineContainer');
+                        
+                        data.forEach((entry, index) => {{
+                            // Staggered Animation: Κάθε κάρτα εμφανίζεται με διαφορά 0.15s
+                            const delay = index * 0.15;
+                            
+                            const item = document.createElement('div');
+                            item.className = 'item';
+                            item.style.animationDelay = `${{delay}}s`;
+                            
+                            item.innerHTML = `
+                                <div class="icon" style="border-color: ${{entry.color}};">
+                                    ${{entry.emoji}}
+                                </div>
+                                <div class="card">
+                                    <div class="header">
+                                        <div class="date">📅 ${{entry.date}}</div>
+                                        <div class="metrics">
+                                            <span class="badge">🧠 Διάθεση: ${{entry.mood}}/10</span>
+                                            <span class="badge">😴 Ύπνος: ${{entry.sleep}}h</span>
+                                            <span class="badge">💧 Νερό: ${{entry.water}}</span>
+                                        </div>
+                                    </div>
+                                    <div class="message">«${{entry.message}}»</div>
+                                </div>
+                            `;
+                            container.appendChild(item);
+                        }});
+                    </script>
+                </body>
+                </html>
+                """, height=750, scrolling=True)
 
-                    card_html = f"""
-                    <div class="history-card">
-                      <div class="history-card-header">
-                        <span class="history-date">🕒 {ts_str}</span>
-                        <span class="history-mood-pill {mood_class}">Διάθεση: {mood}/10</span>
-                      </div>
-                      <div class="history-meta-row">
-                        <span class="history-chip">😴 Ύπνος: {sleep} ώρες</span>
-                        <span class="history-chip">💧 Νερό: {water} ποτήρια</span>
-                      </div>
-                      <div class="history-message">«{short_msg_html}»</div>
-                    </div>
-                    """
-                    st.markdown(card_html, unsafe_allow_html=True)
 
-                with st.expander("📌 Στήλες που βρέθηκαν στο CSV", expanded=False):
-                    st.write(list(df_all.columns))
-                    st.write("Σύνολο εγγραφών:", len(df_all))
-                    if "email" in df_all.columns and current_email:
-                        st.write("Εγγραφές για το email σου:", int((df_all["email"].astype(str).str.lower().str.strip() == current_email).sum()))
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================
-# ΣΤΑΤΙΣΤΙΚΑ TAB
+# ΣΤΑΤΙΣΤΙΚΑ TAB (Interactive Glass Charts με Chart.js)
 # ============================================================
 
 with tab_stats:
-    import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
-
     st.markdown(
         """
         <div class="page-header">
           <h1 class='page-title'>📊 Στατιστικά Ευεξίας</h1>
-          <p class='page-subtitle'>Μια ματιά στις τελευταίες καταγραφές σου – διάθεση, ύπνος και νερό.</p>
+          <p class='page-subtitle'>Μια ζωντανή, οπτική απεικόνιση των πρόσφατων check-ins σου.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown("<div class='main-wrapper'>", unsafe_allow_html=True)
-
     csv_path = os.path.join(os.path.dirname(__file__), "..", "user_data.csv")
 
     if not os.path.exists(csv_path):
         st.info("Δεν βρέθηκε ακόμη αρχείο καταγραφών. Κάνε πρώτα μερικά check-ins στην καρτέλα «Chat».")
-        st.markdown("</div>", unsafe_allow_html=True)
     else:
         df = pd.read_csv(csv_path)
         if df.empty:
             st.info("Το αρχείο καταγραφών είναι άδειο. Κάνε ένα πρώτο check-in στην καρτέλα «Chat».")
-            st.markdown("</div>", unsafe_allow_html=True)
         else:
             if "timestamp" in df.columns:
                 df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
 
             current_email = st.session_state.get("user_email", "")
             if "email" in df.columns and current_email:
-                df = df[df["email"] == current_email]
+                df = df[df["email"].astype(str).str.lower().str.strip() == current_email.strip().lower()]
 
             if df.empty:
                 st.info("Δεν βρέθηκαν καταγραφές για αυτόν τον λογαριασμό. Δοκίμασε ένα νέο check-in.")
-                st.markdown("</div>", unsafe_allow_html=True)
             else:
                 if "timestamp" in df.columns:
                     df = df.sort_values("timestamp")
 
-                df_last = df.tail(60).copy()
+                df_last = df.tail(15).copy() # Παίρνουμε τα τελευταία 15 για πιο καθαρά διαγράμματα
 
                 for col in ["mood", "sleep", "water"]:
-                    df_last[col] = pd.to_numeric(df_last[col], errors="coerce")
+                    df_last[col] = pd.to_numeric(df_last[col], errors="coerce").fillna(0)
 
                 avg_mood = df_last["mood"].mean()
                 avg_sleep = df_last["sleep"].mean()
@@ -2015,85 +2135,227 @@ with tab_stats:
                 last_sleep = float(last_row.get("sleep", 0) or 0)
                 last_water = float(last_row.get("water", 0) or 0)
 
-                st.markdown("### 🧾 Σύνοψη τελευταίων καταγραφών")
-                st.caption("Συνοπτική εικόνα από τις πρόσφατες εγγραφές σου.")
-
+                # --- 1. ΚΑΡΤΕΣ ΣΥΝΟΨΗΣ ΣΤΗΝ ΚΟΡΥΦΗ ---
                 col_a, col_b, col_c = st.columns(3)
                 with col_a:
                     st.markdown(
                         f"""
-                        <div class="stats-card stats-card-mood">
+                        <div class="stats-card stats-card-mood" style="animation: cardFadeIn 0.4s ease-out;">
                           <div class="stats-card-label">Διάθεση</div>
                           <div class="stats-card-main">{last_mood:.1f}/10</div>
-                          <div class="stats-card-sub">Μ.Ο.: {avg_mood:.1f}/10</div>
+                          <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_mood:.1f}</div>
                         </div>
-                        """,
-                        unsafe_allow_html=True,
+                        """, unsafe_allow_html=True
                     )
                 with col_b:
                     st.markdown(
                         f"""
-                        <div class="stats-card stats-card-sleep">
+                        <div class="stats-card stats-card-sleep" style="animation: cardFadeIn 0.6s ease-out;">
                           <div class="stats-card-label">Ύπνος</div>
-                          <div class="stats-card-main">{last_sleep:.1f} ώρες</div>
-                          <div class="stats-card-sub">Μ.Ο.: {avg_sleep:.1f} ώρες</div>
+                          <div class="stats-card-main">{last_sleep:.1f}h</div>
+                          <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_sleep:.1f}h</div>
                         </div>
-                        """,
-                        unsafe_allow_html=True,
+                        """, unsafe_allow_html=True
                     )
                 with col_c:
                     st.markdown(
                         f"""
-                        <div class="stats-card stats-card-water">
+                        <div class="stats-card stats-card-water" style="animation: cardFadeIn 0.8s ease-out;">
                           <div class="stats-card-label">Νερό</div>
-                          <div class="stats-card-main">{last_water:.1f} ποτήρια</div>
-                          <div class="stats-card-sub">Μ.Ο.: {avg_water:.1f} ποτήρια</div>
+                          <div class="stats-card-main">{last_water:.0f} ποτ.</div>
+                          <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_water:.1f}</div>
                         </div>
-                        """,
-                        unsafe_allow_html=True,
+                        """, unsafe_allow_html=True
                     )
 
-                st.markdown("---")
-
+                # --- 2. ΠΡΟΕΤΟΙΜΑΣΙΑ ΔΕΔΟΜΕΝΩΝ ΓΙΑ ΤΗ JAVASCRIPT ---
                 if "timestamp" not in df_last.columns or df_last["timestamp"].isna().all():
-                    st.info("Δεν υπάρχουν έγκυρες ημερομηνίες στις καταγραφές, οπότε δεν μπορώ να δείξω διαγράμματα ακόμη.")
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    st.info("Δεν υπάρχουν έγκυρες ημερομηνίες για να φτιάξω τα διαγράμματα.")
                 else:
                     df_last = df_last.dropna(subset=["timestamp"])
-                    dates = df_last["timestamp"]
+                    
+                    # Μετατροπή ημερομηνιών σε μικρή μορφή (π.χ. "15/05")
+                    dates_list = df_last["timestamp"].dt.strftime("%d/%m").tolist()
+                    mood_list = df_last["mood"].tolist()
+                    sleep_list = df_last["sleep"].tolist()
+                    water_list = df_last["water"].tolist()
 
-                    st.markdown("### Διάθεση με τον χρόνο")
-                    fig1, ax1 = plt.subplots()
-                    ax1.plot(dates, df_last["mood"], marker="o")
-                    ax1.set_ylabel("Διάθεση (1–10)")
-                    ax1.set_xlabel("Ημερομηνία")
-                    ax1.set_ylim(0, 10.5)
-                    ax1.grid(True, alpha=0.25)
-                    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m"))
-                    fig1.autofmt_xdate()
-                    st.pyplot(fig1)
+                    dates_json = json.dumps(dates_list)
+                    mood_json = json.dumps(mood_list)
+                    sleep_json = json.dumps(sleep_list)
+                    water_json = json.dumps(water_list)
 
-                    st.markdown("###  Ύπνος με τον χρόνο")
-                    fig2, ax2 = plt.subplots()
-                    ax2.plot(dates, df_last["sleep"], marker="o")
-                    ax2.set_ylabel("Ύπνος (ώρες)")
-                    ax2.set_xlabel("Ημερομηνία")
-                    ax2.grid(True, alpha=0.25)
-                    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m"))
-                    fig2.autofmt_xdate()
-                    st.pyplot(fig2)
+                    # --- 3. JAVASCRIPT & CHART.JS ΟΠΤΙΚΟΠΟΙΗΣΗ ---
+                    components.html(f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+                        <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600&display=swap" rel="stylesheet">
+                        <style>
+                            body {{
+                                margin: 0; padding: 10px;
+                                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                                background: transparent;
+                            }}
+                            .chart-container {{
+                                background: rgba(255, 255, 255, 0.45);
+                                backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+                                border: 1px solid rgba(255, 255, 255, 0.7);
+                                border-radius: 20px;
+                                padding: 20px;
+                                margin-bottom: 25px;
+                                box-shadow: 0 10px 30px rgba(108, 90, 158, 0.08);
+                                transition: transform 0.3s ease;
+                                opacity: 0;
+                                transform: translateY(20px);
+                                animation: fadeInUp 0.8s ease-out forwards;
+                            }}
+                            .chart-container:hover {{
+                                transform: translateY(-4px);
+                                box-shadow: 0 15px 40px rgba(108, 90, 158, 0.15);
+                                background: rgba(255, 255, 255, 0.6);
+                            }}
+                            .chart-title {{
+                                color: #4A3D73; font-weight: 600; font-size: 16px; 
+                                margin-bottom: 15px; margin-top: 0; display: flex; align-items: center; gap: 8px;
+                            }}
+                            /* Staggered animation delays */
+                            #c1 {{ animation-delay: 0.1s; }}
+                            #c2 {{ animation-delay: 0.3s; }}
+                            #c3 {{ animation-delay: 0.5s; }}
+                            
+                            @keyframes fadeInUp {{
+                                to {{ opacity: 1; transform: translateY(0); }}
+                            }}
+                            
+                            /* Container για τα canvas ώστε να είναι responsive */
+                            .canvas-wrapper {{ position: relative; height: 220px; width: 100%; }}
+                        </style>
+                    </head>
+                    <body>
 
-                    st.markdown("###  Νερό με τον χρόνο")
-                    fig3, ax3 = plt.subplots()
-                    ax3.plot(dates, df_last["water"], marker="o")
-                    ax3.set_ylabel("Νερό (ποτήρια)")
-                    ax3.set_xlabel("Ημερομηνία")
-                    ax3.grid(True, alpha=0.25)
-                    ax3.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m"))
-                    fig3.autofmt_xdate()
-                    st.pyplot(fig3)
+                        <div class="chart-container" id="c1">
+                            <h3 class="chart-title">🧠 Διακυμάνσεις Διάθεσης</h3>
+                            <div class="canvas-wrapper"><canvas id="moodChart"></canvas></div>
+                        </div>
 
-                    st.markdown("</div>", unsafe_allow_html=True)
+                        <div class="chart-container" id="c2">
+                            <h3 class="chart-title">😴 Ποιότητα Ύπνου (Ώρες)</h3>
+                            <div class="canvas-wrapper"><canvas id="sleepChart"></canvas></div>
+                        </div>
+
+                        <div class="chart-container" id="c3">
+                            <h3 class="chart-title">💧 Ενυδάτωση (Ποτήρια)</h3>
+                            <div class="canvas-wrapper"><canvas id="waterChart"></canvas></div>
+                        </div>
+
+                        <script>
+                            // Κοινές ρυθμίσεις για γραμματοσειρές και στυλ αξόνων
+                            Chart.defaults.font.family = "'Segoe UI', Tahoma, sans-serif";
+                            Chart.defaults.color = '#73658a';
+                            Chart.defaults.scale.grid.color = 'rgba(183, 157, 242, 0.15)';
+                            
+                            const commonOptions = {{
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {{
+                                    legend: {{ display: false }},
+                                    tooltip: {{
+                                        backgroundColor: 'rgba(74, 61, 115, 0.9)',
+                                        titleFont: {{ size: 13 }},
+                                        bodyFont: {{ size: 14, weight: 'bold' }},
+                                        padding: 12,
+                                        cornerRadius: 8,
+                                        displayColors: false
+                                    }}
+                                }},
+                                scales: {{
+                                    x: {{ grid: {{ display: false }} }},
+                                    y: {{ beginAtZero: true, border: {{ display: false }} }}
+                                }},
+                                interaction: {{ mode: 'index', intersect: false }},
+                                elements: {{
+                                    line: {{ tension: 0.4 }}, // 0.4 δίνει την απαλή καμπύλη (spline)
+                                    point: {{ radius: 4, hoverRadius: 7, borderWidth: 2 }}
+                                }}
+                            }};
+
+                            // Δεδομένα από Python
+                            const labels = {dates_json};
+
+                            // --- 1. ΔΙΑΓΡΑΜΜΑ ΔΙΑΘΕΣΗΣ ---
+                            const ctxMood = document.getElementById('moodChart').getContext('2d');
+                            let gradientMood = ctxMood.createLinearGradient(0, 0, 0, 220);
+                            gradientMood.addColorStop(0, 'rgba(255, 143, 163, 0.6)'); // Ροζ απαλό
+                            gradientMood.addColorStop(1, 'rgba(255, 143, 163, 0.0)');
+                            
+                            new Chart(ctxMood, {{
+                                type: 'line',
+                                data: {{
+                                    labels: labels,
+                                    datasets: [{{
+                                        label: 'Διάθεση (1-10)',
+                                        data: {mood_json},
+                                        borderColor: '#ff758f',
+                                        backgroundColor: gradientMood,
+                                        pointBackgroundColor: '#ffffff',
+                                        pointBorderColor: '#ff758f',
+                                        fill: true,
+                                    }}]
+                                }},
+                                options: {{ ...commonOptions, scales: {{ y: {{ max: 10, min: 0 }} }} }}
+                            }});
+
+                            // --- 2. ΔΙΑΓΡΑΜΜΑ ΥΠΝΟΥ ---
+                            const ctxSleep = document.getElementById('sleepChart').getContext('2d');
+                            let gradientSleep = ctxSleep.createLinearGradient(0, 0, 0, 220);
+                            gradientSleep.addColorStop(0, 'rgba(183, 157, 242, 0.6)'); // Λιλά
+                            gradientSleep.addColorStop(1, 'rgba(183, 157, 242, 0.0)');
+
+                            new Chart(ctxSleep, {{
+                                type: 'line',
+                                data: {{
+                                    labels: labels,
+                                    datasets: [{{
+                                        label: 'Ώρες Ύπνου',
+                                        data: {sleep_json},
+                                        borderColor: '#9d7bea',
+                                        backgroundColor: gradientSleep,
+                                        pointBackgroundColor: '#ffffff',
+                                        pointBorderColor: '#9d7bea',
+                                        fill: true,
+                                    }}]
+                                }},
+                                options: commonOptions
+                            }});
+
+                            // --- 3. ΔΙΑΓΡΑΜΜΑ ΝΕΡΟΥ ---
+                            const ctxWater = document.getElementById('waterChart').getContext('2d');
+                            let gradientWater = ctxWater.createLinearGradient(0, 0, 0, 220);
+                            gradientWater.addColorStop(0, 'rgba(137, 207, 240, 0.6)'); // Γαλάζιο/Κυανό
+                            gradientWater.addColorStop(1, 'rgba(137, 207, 240, 0.0)');
+
+                            new Chart(ctxWater, {{
+                                type: 'line',
+                                data: {{
+                                    labels: labels,
+                                    datasets: [{{
+                                        label: 'Ποτήρια Νερό',
+                                        data: {water_json},
+                                        borderColor: '#5bc0eb',
+                                        backgroundColor: gradientWater,
+                                        pointBackgroundColor: '#ffffff',
+                                        pointBorderColor: '#5bc0eb',
+                                        fill: true,
+                                    }}]
+                                }},
+                                options: commonOptions
+                            }});
+                        </script>
+                    </body>
+                    </html>
+                    """, height=900, scrolling=True)
 
 
 # ============================================================
@@ -2124,112 +2386,365 @@ with tab_ex:
     st.markdown("<div class='main-wrapper'>", unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # 1. Άσκηση αναπνοής 4–2–6
+    # 1. Άσκηση αναπνοής 4–2–6 (ΜΕ JAVASCRIPT & ANIMATION)
     # --------------------------------------------------------
-    st.markdown("### 1. Άσκηση αναπνοής 4–2–6")
-    col_left, col_right = st.columns([1, 2])
-
-    with col_left:
-        st.markdown(
-            """
-            <div class="breathing-container">
-              <div class="breathing-circle"></div>
-              <p class="breathing-hint">4″ εισπνοή • 2″ κράτημα • 6″ εκπνοή</p>
+    st.markdown("### 1. Διαδραστική Άσκηση Αναπνοής 4–2–6")
+    st.write("Συγχρόνισε την αναπνοή σου με τον κύκλο. Χρησιμεύει για άμεση μείωση του στρες.")
+    
+    # Εδώ γράφουμε καθαρή HTML, CSS και JAVASCRIPT!
+    components.html(
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {
+                    display: flex; justify-content: center; align-items: center;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    height: 250px; margin: 0; background-color: transparent;
+                }
+                .container {
+                    text-align: center;
+                }
+                .circle {
+                    width: 120px; height: 120px;
+                    border-radius: 50%;
+                    background: radial-gradient(circle, #ffb6c1 0%, #ff69b4 100%);
+                    box-shadow: 0 10px 30px rgba(255, 105, 180, 0.4);
+                    margin: 0 auto 20px auto;
+                    display: flex; justify-content: center; align-items: center;
+                    color: white; font-weight: bold; font-size: 18px;
+                    transition: transform 4s ease-in-out; /* Ομαλό animation */
+                }
+                button {
+                    background-color: #6C5A9E; color: white; border: none;
+                    padding: 10px 24px; border-radius: 8px; font-size: 16px;
+                    cursor: pointer; transition: 0.3s;
+                }
+                button:hover { background-color: #4A3D73; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="circle" id="breathCircle">Έτοιμος;</div>
+                <br>
+                <button id="startBtn" onclick="startBreathing()">Ξεκίνα Άσκηση</button>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        if st.button("Ξεκίνα 5 κύκλους αναπνοής", key="breath_start"):
-            st.info(
-                "Πάρε 4″ εισπνοή από τη μύτη, κράτησε 2″ και εκπνοή από το στόμα για 6″. "
-                "Επανάλαβε 5 φορές, με όσο πιο ήρεμο ρυθμό μπορείς."
-            )
 
-    with col_right:
-        st.write(
-            "Χρησιμεύει όταν υπάρχει έντονο άγχος ή σωματική ένταση.\n\n"
-            "Μπορείς να το δεις σαν ένα μικρό reset του νευρικού συστήματος."
-        )
+            <script>
+                function startBreathing() {
+                    const circle = document.getElementById('breathCircle');
+                    const btn = document.getElementById('startBtn');
+                    btn.style.display = 'none'; // Κρύβουμε το κουμπί
 
+                    function breatheCycle() {
+                        // 1. Εισπνοή (4 δευτερόλεπτα) - Ο κύκλος μεγαλώνει
+                        circle.style.transition = 'transform 4s ease-in-out';
+                        circle.style.transform = 'scale(1.6)';
+                        circle.innerText = 'Εισπνοή (4)';
+
+                        setTimeout(() => {
+                            // 2. Κράτημα (2 δευτερόλεπτα) - Ο κύκλος μένει μεγάλος
+                            circle.innerText = 'Κράτα (2)';
+
+                            setTimeout(() => {
+                                // 3. Εκπνοή (6 δευτερόλεπτα) - Ο κύκλος μικραίνει
+                                circle.style.transition = 'transform 6s ease-in-out';
+                                circle.style.transform = 'scale(1)';
+                                circle.innerText = 'Εκπνοή (6)';
+                            }, 2000); // Περιμένει τα 2 δευτερόλεπτα του κρατήματος
+
+                        }, 4000); // Περιμένει τα 4 δευτερόλεπτα της εισπνοής
+                    }
+
+                    // Ξεκινάμε τον πρώτο κύκλο αμέσως
+                    breatheCycle();
+                    // Επαναλαμβάνουμε κάθε 12 δευτερόλεπτα (4+2+6)
+                    setInterval(breatheCycle, 12000);
+                }
+            </script>
+        </body>
+        </html>
+        """,
+        height=300,
+    )
     st.markdown("---")
 
     # --------------------------------------------------------
-    # 2. Αποφόρτιση σκέψεων
+    # 2. Αποφόρτιση σκέψεων (100% LLM Powered)
     # --------------------------------------------------------
     st.markdown("### 2. Μικρή άσκηση αποφόρτισης σκέψεων")
-    col_a, col_b = st.columns([2, 1])
+    st.write("Σημείωσε αυτό που σε βαραίνει. Το σύστημα θα το διαβάσει με ενσυναίσθηση και θα σου επιστρέψει μια σκέψη φροντίδας πριν το αφήσεις να φύγει.")
 
-    with col_a:
-        heavy_thought = st.text_area(
-            "📝 Συμπλήρωσε: «Αυτό που με βαραίνει περισσότερο είναι…»",
-            height=80,
-            key="heavy_thought",
-        )
+    # Χρησιμοποιούμε session_state για να θυμόμαστε αν ολοκληρώθηκε η άσκηση
+    if "discharge_done" not in st.session_state:
+        st.session_state.discharge_done = False
+        st.session_state.discharge_msg = ""
 
-    with col_b:
-        if st.button("Αποφόρτιση", key="discharge_btn", use_container_width=True):
-            if (heavy_thought or "").strip():
-                st.success(
-                    "Το έγραψες — άρα δεν το κρατάς μόνο μέσα σου. "
-                    "Δεν χρειάζεται να λυθεί τώρα."
-                )
-            else:
-                st.warning("Γράψε πρώτα μία μικρή πρόταση 🙂")
+    # Ένα placeholder container για να μπορούμε να αλλάζουμε την οθόνη δυναμικά
+    discharge_placeholder = st.empty()
+
+    if not st.session_state.discharge_done:
+        with discharge_placeholder.container():
+            discharge_input = st.text_area(
+                "📝 «Αυτό που με βαραίνει περισσότερο είναι…»",
+                height=80,
+                key="discharge_input_text"
+            )
+            
+            if st.button("Αποφόρτιση ✨", key="btn_discharge"):
+                if not discharge_input.strip():
+                    st.warning("Γράψε κάτι μικρό πρώτα για να μπορέσω να βοηθήσω...")
+                else:
+                    with st.spinner("Δίνουμε χώρο στη σκέψη σου..."):
+                        # ΚΛΗΣΗ ΣΤΟ LLM
+                        profile = load_profile()
+                        
+                        # Στέλνουμε τη σκέψη σαν μέρος του context
+                        chat_tail = get_chat_tail_from_state() + [f"Θέλω να αποφορτίσω αυτή τη σκέψη που με βαραίνει: {discharge_input}"]
+                        active_mode = st.session_state.get("active_mode", "NONE")
+
+                        key = "discharge_thought"
+                        history = st.session_state.microcoach_history.get(key, [])
+
+                        msg = micro_prompt_with_fallback(
+                            exercise_key=key,
+                            profile=profile,
+                            chat_tail=chat_tail,
+                            active_mode=active_mode,
+                            avoid_texts=history,
+                        )
+
+                        history.append(msg)
+                        st.session_state.microcoach_history[key] = history[-8:]
+
+                        # Αποθήκευση και αλλαγή οθόνης
+                        st.session_state.discharge_msg = msg
+                        st.session_state.discharge_done = True
+                        st.rerun()
+    else:
+        # Αν η αποφόρτιση έγινε, δείχνουμε την απάντηση του LLM στο γυάλινο design
+        with discharge_placeholder.container():
+            st.markdown(
+                f"""
+                <div style="background: rgba(255, 255, 255, 0.45);
+                            backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+                            border: 1px solid rgba(255, 255, 255, 0.6);
+                            border-radius: 16px; padding: 30px; text-align: center; 
+                            box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08);
+                            animation: cardFadeIn 1s ease-out; margin-bottom: 15px;">
+                    <div style="font-size: 45px; margin-bottom: 15px; opacity: 0.9;">🍃</div>
+                    <div style="color: #3b304c; font-size: 1.1rem; line-height: 1.6; font-weight: 500;">
+                        {st.session_state.discharge_msg}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True
+            )
+            
+            # Κουμπί για επαναφορά
+            col_spacer1, col_reset, col_spacer2 = st.columns([1, 1, 1])
+            with col_reset:
+                if st.button("🔄 Νέα αποφόρτιση", key="reset_discharge", use_container_width=True):
+                    st.session_state.discharge_done = False
+                    st.session_state.discharge_msg = ""
+                    st.rerun()
 
     st.markdown("---")
 
     # --------------------------------------------------------
-    # 3. Θλίψη / μοναξιά
+    # 3. Θλίψη / μοναξιά (100% LLM Powered - Native Glassmorphism)
     # --------------------------------------------------------
     st.markdown("### 3. Άσκηση ηρεμίας για θλίψη / μοναξιά")
-    col1, col2 = st.columns([2, 1])
+    st.write("Μια μικρή παύση για να υπενθυμίσεις στον εαυτό σου ότι δεν είσαι μόνος/η, προσαρμοσμένη ακριβώς σε αυτό που νιώθεις.")
 
-    with col1:
-        st.write(
-            "Όταν νιώθεις βαρύς/ιά ή μόνος/η:\n\n"
-            "1. Βάλε το χέρι στο στήθος.\n"
-            "2. Πάρε μία αργή ανάσα.\n"
-            "3. Πες από μέσα σου:\n\n"
-            "_«Είναι εντάξει να νιώθω έτσι. Δεν είμαι μόνος/η.»_"
-        )
+    if "lonely_done" not in st.session_state:
+        st.session_state.lonely_done = False
+        st.session_state.lonely_msg = ""
 
-    with col2:
-        if st.button("Θέλω μια μικρή φράση στήριξης", key="lonely_btn"):
-            profile = load_profile()
-            chat_tail = get_chat_tail_from_state()
-            active_mode = st.session_state.get("active_mode", "NONE")
+    lonely_placeholder = st.empty()
 
-            key = "support_phrase"
-            history = st.session_state.microcoach_history.get(key, [])
-
-            msg = micro_prompt_with_fallback(
-                exercise_key=key,
-                profile=profile,
-                chat_tail=chat_tail,
-                active_mode=active_mode,
-                avoid_texts=history,
+    if not st.session_state.lonely_done:
+        with lonely_placeholder.container():
+            st.markdown(
+                """
+                <div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+                            border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; 
+                            padding: 30px; text-align: center; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08);">
+                    <div style="font-size: 60px; margin-bottom: 15px; display: inline-block; animation: softPulse 3s infinite;">🤍</div>
+                    <div style="color: #3b304c; font-size: 1.1rem; margin-bottom: 20px; font-weight: 500;">
+                        Όταν νιώθεις μοναξιά ή βάρος, κάνε αυτό το μικρό δώρο στον εαυτό σου.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True
             )
+            
+            # Βάζουμε κενά δεξιά-αριστερά για να μην απλώνει τελείως το κουμπί
+            col_l1, col_lbtn, col_l2 = st.columns([1, 2, 1])
+            with col_lbtn:
+                if st.button("Ξεκίνα τη στιγμή φροντίδας ✨", key="btn_lonely_start", use_container_width=True):
+                    with st.spinner("Αφουγκράζομαι το πώς νιώθεις..."):
+                        profile = load_profile()
+                        
+                        # Στέλνουμε το chat context + μια κρυφή "σκηνοθετική" οδηγία στο LLM
+                        chat_tail = get_chat_tail_from_state() 
+                        chat_tail.append(
+                            "Ο χρήστης μόλις πάτησε το κουμπί για την άσκηση ανακούφισης από μοναξιά/θλίψη. "
+                            "Βάσει του ιστορικού και του προφίλ του, δώσε του 2-3 προτάσεις βαθιάς, ζεστής ενσυναίσθησης "
+                            "που να τον αγγίζουν, και κλείσε με 1 θετική επιβεβαίωση (affirmation) σε εισαγωγικά που να μπορεί να πει στον εαυτό του."
+                        )
+                        
+                        active_mode = st.session_state.get("active_mode", "NONE")
+                        key = "lonely_care"
+                        history = st.session_state.microcoach_history.get(key, [])
 
-            history.append(msg)
-            st.session_state.microcoach_history[key] = history[-8:]
-            st.info(msg)
+                        msg = micro_prompt_with_fallback(
+                            exercise_key=key,
+                            profile=profile,
+                            chat_tail=chat_tail,
+                            active_mode=active_mode,
+                            avoid_texts=history,
+                        )
+
+                        history.append(msg)
+                        st.session_state.microcoach_history[key] = history[-8:]
+
+                        st.session_state.lonely_msg = msg
+                        st.session_state.lonely_done = True
+                        st.rerun()
+    else:
+        # Εμφάνιση της προσωποποιημένης απάντησης
+        with lonely_placeholder.container():
+            st.markdown(
+                f"""
+                <div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+                            border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; 
+                            padding: 30px; text-align: center; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08);
+                            animation: cardFadeIn 1s ease-out;">
+                    <div style="font-size: 60px; margin-bottom: 15px; display: inline-block; animation: softPulse 2s infinite;">💖</div>
+                    <div style="color: #3b304c; font-size: 1.05rem; line-height: 1.6; margin-bottom: 20px;">
+                        <strong>1.</strong> Βάλε το χέρι σου στο κέντρο του στήθους και νιώσε τη ζεστασιά σου.<br>
+                        <strong>2.</strong> Πάρε μια αργή, βαθιά ανάσα.<br>
+                        <strong>3.</strong> Διάβασε αυτά τα λόγια:
+                    </div>
+                    <div style="background: rgba(255, 255, 255, 0.75); border-left: 4px solid #ff8fa3; 
+                                padding: 20px; border-radius: 12px; margin-top: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.02);">
+                        <div style="color: #d81b60; font-size: 1.1rem; line-height: 1.6; font-weight: 500; font-style: italic;">
+                            {st.session_state.lonely_msg}
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True
+            )
+            
+            col_l1, col_lbtn, col_l2 = st.columns([1, 1, 1])
+            with col_lbtn:
+                if st.button("🔄 Επιστροφή", key="reset_lonely", use_container_width=True):
+                    st.session_state.lonely_done = False
+                    st.session_state.lonely_msg = ""
+                    st.rerun()
 
     st.markdown("---")
 
     # --------------------------------------------------------
-    # 4. Νερό
+    # 4. Νερό (ΜΕ JAVASCRIPT ANIMATION - ΓΕΜΙΣΜΑ ΠΟΤΗΡΙΟΥ)
     # --------------------------------------------------------
-    st.markdown("### 4. Μικρή άσκηση φροντίδας σώματος")
-    col_w1, col_w2 = st.columns([2, 1])
+    st.markdown("### 4. Μικρή άσκηση φροντίδας σώματος (Ενυδάτωση)")
+
+    col_w1, col_w2 = st.columns([1.2, 1])
 
     with col_w1:
-        st.write(
-            "Ένα ποτήρι νερό είναι μικρή αλλά ουσιαστική πράξη φροντίδας.\n\n"
-            "Δοκίμασε να το συνδυάσεις με 3 αργές αναπνοές."
+        components.html(
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { 
+                        margin: 0; display: flex; justify-content: center; align-items: center; 
+                        font-family: 'Segoe UI', Tahoma, Geneva, sans-serif; background: transparent; height: 240px;
+                    }
+                    .container { text-align: center; width: 100%; }
+                    .info-text { 
+                        color: #4A3D73; font-weight: 600; font-size: 15px; margin-bottom: 15px;
+                    }
+                    /* Το ποτήρι */
+                    .glass {
+                        width: 70px; height: 110px;
+                        border: 4px solid #acd8e5;
+                        border-top: none;
+                        border-radius: 0 0 15px 15px;
+                        position: relative;
+                        overflow: hidden;
+                        margin: 0 auto;
+                        cursor: pointer;
+                        background: rgba(255, 255, 255, 0.7);
+                        box-shadow: 0 8px 15px rgba(172, 216, 229, 0.3);
+                        transition: transform 0.3s ease;
+                    }
+                    .glass:hover {
+                        transform: translateY(-4px);
+                        box-shadow: 0 12px 20px rgba(172, 216, 229, 0.5);
+                    }
+                    /* Το νερό με το εφέ κύματος */
+                    .water {
+                        position: absolute;
+                        bottom: 0;
+                        left: -50%;
+                        width: 200%;
+                        height: 15%; /* Αρχίζει σχεδόν άδειο */
+                        background: #89cff0;
+                        transition: height 2.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                        border-radius: 40%;
+                        animation: wave-spin 3s infinite linear;
+                        opacity: 0.85;
+                    }
+                    @keyframes wave-spin {
+                        100% { transform: rotate(360deg); }
+                    }
+                    .hidden-msg { 
+                        opacity: 0; transition: opacity 1s; color: #2e7d32; 
+                        margin-top: 15px; font-weight: 600; font-size: 14px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="info-text">Πιες 1 ποτήρι νερό & κάνε κλικ:</div>
+                    
+                    <div class="glass" onclick="fillWater()" title="Κάνε κλικ για να γεμίσει!">
+                       <div class="water" id="waterLvl"></div>
+                    </div>
+                    
+                    <div id="cheers" class="hidden-msg">Εξαιρετικά! 💧 Το σώμα σου σε ευχαριστεί.</div>
+                </div>
+                <script>
+                    function fillWater() {
+                        const water = document.getElementById('waterLvl');
+                        const msg = document.getElementById('cheers');
+                        
+                        // Ανεβάζουμε τη στάθμη του νερού πάνω από 100% για να γεμίσει το ποτήρι
+                        water.style.height = '120%'; 
+                        
+                        // Εμφάνιση του μηνύματος αφού γεμίσει το νερό
+                        setTimeout(() => {
+                            msg.style.opacity = 1;
+                        }, 1800);
+                    }
+                </script>
+            </body>
+            </html>
+            """,
+            height=250,
         )
 
     with col_w2:
-        if st.button("💧 Μικρή υπενθύμιση νερού", key="water_nudge"):
+        st.write(
+            "Ένα ποτήρι νερό είναι μια πολύ μικρή, αλλά ουσιαστική πράξη φροντίδας "
+            "για το νευρικό σου σύστημα.\n\n"
+            "Πάρε 3 αργές αναπνοές καθώς το πίνεις."
+        )
+        # Κρατάμε το LLM button ανέπαφο!
+        if st.button("✨ Φράση για το νερό", key="water_nudge"):
             profile = load_profile()
             chat_tail = get_chat_tail_from_state()
             active_mode = st.session_state.get("active_mode", "NONE")
@@ -2252,56 +2767,246 @@ with tab_ex:
     st.markdown("---")
 
     # --------------------------------------------------------
-    # 5. 3 μικρά στηρίγματα
+    # 5. 3 μικρά στηρίγματα (100% LLM Powered)
     # --------------------------------------------------------
     st.markdown("### 5. Άσκηση «3 μικρά στηρίγματα της ημέρας»")
-    st.write(
-        "Σημείωσε τρία μικρά πράγματα που σε στήριξαν σήμερα "
-        "(όσο μικρά κι αν φαίνονται)."
-    )
+    st.write("Σημείωσε τρία μικρά πράγματα που σε στήριξαν σήμερα (όσο μικρά κι αν φαίνονται). Το σύστημα θα τα διαβάσει και θα σου δώσει μια δική σου, μοναδική οπτική γι' αυτά.")
 
-    col_s1, col_s2, col_s3 = st.columns(3)
-    with col_s1:
-        support1 = st.text_input("Στήριγμα 1", key="support1")
-    with col_s2:
-        support2 = st.text_input("Στήριγμα 2", key="support2")
-    with col_s3:
-        support3 = st.text_input("Στήριγμα 3", key="support3")
+    if "supports_done" not in st.session_state:
+        st.session_state.supports_done = False
+        st.session_state.supports_msg = ""
+        st.session_state.user_supports = []
 
-    if support1 or support2 or support3:
-        st.caption("Αυτά τα μικρά στηρίγματα μετράνε περισσότερο απ’ όσο φαίνεται.")
+    supports_placeholder = st.empty()
 
-    st.markdown("---")
+    if not st.session_state.supports_done:
+        with supports_placeholder.container():
+            # Χρησιμοποιούμε στήλες για να μπουν δίπλα-δίπλα τα πεδία
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                s1 = st.text_input("1ο στήριγμα...", key="sup1")
+            with col_s2:
+                s2 = st.text_input("2ο στήριγμα...", key="sup2")
+            with col_s3:
+                s3 = st.text_input("3ο στήριγμα...", key="sup3")
+                
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+            with col_btn2:
+                if st.button("Κράτησε τα στηρίγματα ✨", use_container_width=True, key="btn_save_supports"):
+                    supports = [s for s in [s1, s2, s3] if s.strip()]
+                    if not supports:
+                        st.warning("Γράψε τουλάχιστον ένα στήριγμα για να προχωρήσουμε 🌿")
+                    else:
+                        with st.spinner("Συνθέτω τα στηρίγματά σου..."):
+                            profile = load_profile()
+                            supports_text = ", ".join(supports)
+                            
+                            # Σκηνοθετική οδηγία προς το LLM!
+                            chat_tail = get_chat_tail_from_state()
+                            chat_tail.append(
+                                f"Ο χρήστης μόλις κατέγραψε τα εξής στηρίγματα για τη μέρα του: [{supports_text}]. "
+                                "Βάσει του ιστορικού και του προφίλ του, γράψε 2-3 προτάσεις που να αναγνωρίζουν "
+                                "την αξία ΑΥΤΩΝ των συγκεκριμένων πραγμάτων. Δείξε του πώς αυτά τα μικρά πράγματα "
+                                "δείχνουν τη δύναμή του ή τη φροντίδα προς τον εαυτό του. Μην δώσεις συμβουλές, απλώς "
+                                "επικύρωσε (validate) συναισθηματικά αυτή του την προσπάθεια."
+                            )
+                            
+                            active_mode = st.session_state.get("active_mode", "NONE")
+                            key = "supports_exercise"
+                            history = st.session_state.microcoach_history.get(key, [])
 
-    # --------------------------------------------------------
-    # 6. Body scan
-    # --------------------------------------------------------
-    st.markdown("### 6. Μικρή σωματική σάρωση (body scan 1′)")
-    col_bs1, col_bs2 = st.columns([2, 1])
+                            msg = micro_prompt_with_fallback(
+                                exercise_key=key,
+                                profile=profile,
+                                chat_tail=chat_tail,
+                                active_mode=active_mode,
+                                avoid_texts=history,
+                            )
 
-    with col_bs1:
-        st.write(
-            "Πάρε 1 λεπτό για να περάσεις προσοχή στο σώμα:\n\n"
-            "• μέτωπο & μάτια\n"
-            "• ώμοι & αυχένας\n"
-            "• στήθος & κοιλιά\n"
-            "• παλάμες & πέλματα\n\n"
-            "Μόνο παρατήρηση — όχι διόρθωση."
-        )
+                            history.append(msg)
+                            st.session_state.microcoach_history[key] = history[-8:]
 
-    with col_bs2:
-        if st.button("Ξεκίνα 1′ body scan", key="bodyscan_btn"):
-            st.info(
-                "Κλείσε τα μάτια και πέρασε ήρεμα την προσοχή σου στο σώμα, "
-                "χωρίς να αλλάξεις τίποτα."
+                            # Αποθήκευση στο session state
+                            st.session_state.user_supports = supports
+                            st.session_state.supports_msg = msg
+                            st.session_state.supports_done = True
+                            st.rerun()
+    else:
+        # Εμφάνιση των αποτελεσμάτων σε Glassmorphism UI
+        with supports_placeholder.container():
+            # Φτιάχνουμε δυναμικά τις κάρτες (pillars) για όσα στηρίγματα έγραψε
+            import html
+            pillars_html = "".join([
+                f"<div style='background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%); border-left: 4px solid #b79df2; padding: 12px 20px; margin: 10px auto; border-radius: 8px; font-weight: 600; color: #4A3D73; width: 80%; box-shadow: 0 2px 8px rgba(108, 90, 158, 0.15);'>{html.escape(s)}</div>" 
+                for s in st.session_state.user_supports
+            ])
+            
+            # ΕΔΩ: Η HTML χωρίς κενά στην αρχή της κάθε γραμμής
+            st.markdown(
+                f"""<div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; padding: 30px; text-align: center; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08); animation: cardFadeIn 0.8s ease-out;">
+<h3 style="color: #4A3D73; font-size: 1.1rem; margin-top: 0;">Τα σημερινά σου θεμέλια:</h3>
+{pillars_html}
+<div style="background: rgba(255, 255, 255, 0.75); border-left: 4px solid #baf7c3; padding: 20px; border-radius: 12px; margin-top: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.02);">
+<div style="color: #158047; font-size: 1.05rem; line-height: 1.6; font-weight: 500; font-style: italic;">
+{st.session_state.supports_msg}
+</div>
+</div>
+</div>""", 
+                unsafe_allow_html=True
             )
-
+            
+            col_l1, col_lbtn, col_l2 = st.columns([1, 1, 1])
+            with col_lbtn:
+                if st.button("🔄 Νέα καταγραφή", key="reset_supports", use_container_width=True):
+                    st.session_state.supports_done = False
+                    st.session_state.supports_msg = ""
+                    st.session_state.user_supports = []
+                    st.rerun()
+                    
     st.markdown("---")
 
     # --------------------------------------------------------
-    # 7. Μικρό παιχνίδι – φροντιστική απάντηση
+    # 6. Body scan (ΜΕ JAVASCRIPT ZEN ANIMATION)
     # --------------------------------------------------------
-    st.markdown("### 🧩 Μικρό παιχνίδι: «Απάντηση φροντίδας σε δύσκολη σκέψη»")
+    st.markdown("### 6. Μικρή σωματική σάρωση (Guided Body Scan)")
+
+    components.html(
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {
+                    margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    display: flex; justify-content: center; align-items: center; background: transparent;
+                }
+                .scan-card {
+                    width: 100%; max-width: 600px; min-height: 280px;
+                    background: linear-gradient(145deg, #f3f0fb 0%, #ffffff 100%);
+                    border-radius: 16px; border: 1px solid #e6e0f8;
+                    box-shadow: 0 10px 30px rgba(108, 90, 158, 0.08);
+                    display: flex; flex-direction: column; align-items: center; justify-content: center;
+                    text-align: center; padding: 20px; position: relative; overflow: hidden;
+                }
+                /* Η σφαίρα εστίασης */
+                .orb {
+                    width: 140px; height: 140px; border-radius: 50%;
+                    background: radial-gradient(circle, #b19cd9 0%, #6C5A9E 100%);
+                    display: flex; justify-content: center; align-items: center;
+                    color: white; font-weight: 600; font-size: 15px; letter-spacing: 0.5px;
+                    box-shadow: 0 0 20px rgba(108, 90, 158, 0.4);
+                    opacity: 0; transform: scale(0.5); /* Αρχικά κρυμμένη */
+                    transition: all 1.5s ease-in-out;
+                    text-align: center; padding: 10px;
+                }
+                .orb.active {
+                    opacity: 1; transform: scale(1);
+                    animation: breathe-pulse 4s infinite alternate ease-in-out;
+                }
+                @keyframes breathe-pulse {
+                    0% { box-shadow: 0 0 15px rgba(108, 90, 158, 0.3); transform: scale(1); }
+                    100% { box-shadow: 0 0 35px rgba(108, 90, 158, 0.6); transform: scale(1.08); }
+                }
+                .intro-text {
+                    color: #4A3D73; font-size: 16px; margin-bottom: 20px; line-height: 1.5;
+                    transition: opacity 1s;
+                }
+                .focus-text {
+                    opacity: 1; transition: opacity 1s ease-in-out;
+                }
+                button {
+                    background: #6C5A9E; color: white; border: none; padding: 12px 28px;
+                    border-radius: 25px; font-size: 15px; cursor: pointer; transition: 0.3s; font-weight: 600;
+                }
+                button:hover { background: #4A3D73; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(108, 90, 158, 0.2); }
+            </style>
+        </head>
+        <body>
+            <div class="scan-card">
+                <div id="intro" class="intro-text">
+                    <strong>1 Λεπτό Σωματικής Σάρωσης</strong><br><br>
+                    Κλείσε τα μάτια, πάρε μια ανάσα και όταν είσαι έτοιμος/η πάτα το κουμπί. <br>
+                    Μόνο παρατήρηση του σώματος — χωρίς προσπάθεια για διόρθωση.
+                </div>
+                
+                <div id="orb" class="orb">
+                    <span id="orbText" class="focus-text">Μέτωπο & Μάτια</span>
+                </div>
+                
+                <br>
+                <button id="startBtn" onclick="startScan()">Ξεκίνα τη σάρωση</button>
+            </div>
+
+            <script>
+                function startScan() {
+                    const btn = document.getElementById('startBtn');
+                    const intro = document.getElementById('intro');
+                    const orb = document.getElementById('orb');
+                    const orbText = document.getElementById('orbText');
+
+                    // Τα στάδια της σάρωσης
+                    const stages = [
+                        "Μέτωπο & Μάτια",
+                        "Ώμοι & Αυχένας",
+                        "Στήθος & Κοιλιά",
+                        "Παλάμες & Πέλματα",
+                        "Ολοκλήρωση 🌿"
+                    ];
+                    
+                    // Κρύβουμε εισαγωγή και κουμπί
+                    btn.style.display = 'none';
+                    intro.style.display = 'none';
+                    
+                    // Εμφανίζουμε τη σφαίρα
+                    orb.classList.add('active');
+
+                    let currentStage = 0;
+
+                    // Λειτουργία για αλλαγή κειμένου με fade out -> αλλαγή -> fade in
+                    function nextStage() {
+                        currentStage++;
+                        if (currentStage < stages.length) {
+                            orbText.style.opacity = 0; // Fade out
+                            
+                            setTimeout(() => {
+                                orbText.innerText = stages[currentStage];
+                                orbText.style.opacity = 1; // Fade in
+                            }, 1000); // Περιμένουμε 1 δευτερόλεπτο να σβήσει
+                        } else {
+                            // Τέλος άσκησης
+                            setTimeout(() => {
+                                orb.classList.remove('active');
+                                orb.style.opacity = 0;
+                                setTimeout(() => {
+                                    intro.innerHTML = "<strong>Ολοκληρώθηκε!</strong><br>Ελπίζω να νιώθεις λίγο πιο γειωμένος/η.";
+                                    intro.style.display = 'block';
+                                }, 1500);
+                            }, 3000);
+                        }
+                    }
+
+                    // Αλλάζουμε περιοχή του σώματος κάθε 8 δευτερόλεπτα (Συνολικά περίπου 40-45 sec)
+                    const scanInterval = setInterval(() => {
+                        if (currentStage >= stages.length - 1) {
+                            clearInterval(scanInterval);
+                        }
+                        nextStage();
+                    }, 8000); 
+                }
+            </script>
+        </body>
+        </html>
+        """,
+        height=320,
+    )
+    st.markdown("---")
+
+    # --------------------------------------------------------
+    # 7. Μικρό παιχνίδι – φροντιστική απάντηση (ΜΕ 3D FLIP CARD)
+    # --------------------------------------------------------
+    st.markdown("### 🧩 Μικρό παιχνίδι: «Απάντηση φροντίδας»")
+    st.write("Επίλεξε μια δύσκολη σκέψη. Δες πώς μπορεί να μεταμορφωθεί όταν της δώσεις λίγο χώρο.")
 
     difficult_thoughts = [
         "Αποτυγχάνω σε όλα.",
@@ -2311,30 +3016,109 @@ with tab_ex:
     ]
 
     chosen_label = st.selectbox(
-        "Διάλεξε μία σκέψη:",
+        "Διάλεξε μία δύσκολη σκέψη:",
         difficult_thoughts,
         key="mh_game_select",
     )
 
-    if st.button("Δείξε μου μια απάντηση φροντίδας", key="mh_game_button"):
-        profile = load_profile()
-        chat_tail = get_chat_tail_from_state() + [f"Δύσκολη σκέψη: {chosen_label}"]
-        active_mode = st.session_state.get("active_mode", "NONE")
+    if st.button("Μεταμόρφωσε τη σκέψη ✨", key="mh_game_button"):
+        with st.spinner("Το σύστημα σκέφτεται μια πιο ζεστή οπτική..."):
+            # Κλήση στο LLM (Backend)
+            profile = load_profile()
+            chat_tail = get_chat_tail_from_state() + [f"Δύσκολη σκέψη: {chosen_label}"]
+            active_mode = st.session_state.get("active_mode", "NONE")
 
-        key = "care_reply_game"
-        history = st.session_state.microcoach_history.get(key, [])
+            key = "care_reply_game"
+            history = st.session_state.microcoach_history.get(key, [])
 
-        msg = micro_prompt_with_fallback(
-            exercise_key=key,
-            profile=profile,
-            chat_tail=chat_tail,
-            active_mode=active_mode,
-            avoid_texts=history,
-        )
+            msg = micro_prompt_with_fallback(
+                exercise_key=key,
+                profile=profile,
+                chat_tail=chat_tail,
+                active_mode=active_mode,
+                avoid_texts=history,
+            )
 
-        history.append(msg)
-        st.session_state.microcoach_history[key] = history[-8:]
-        st.info(msg)
+            history.append(msg)
+            st.session_state.microcoach_history[key] = history[-8:]
+            
+            # Προετοιμασία κειμένων για να μπουν με ασφάλεια στην HTML
+            safe_thought = html.escape(chosen_label).replace('\n', '<br>')
+            safe_msg = html.escape(msg).replace('\n', '<br>')
+
+            # Το 3D Flip Card (Frontend)
+            components.html(
+                f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {{ 
+                            margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                            display: flex; justify-content: center; background: transparent; padding-top: 15px; 
+                        }}
+                        .flip-card {{
+                            background-color: transparent; width: 100%; max-width: 600px; 
+                            height: 220px; perspective: 1000px;
+                        }}
+                        .flip-card-inner {{
+                            position: relative; width: 100%; height: 100%; text-align: center;
+                            transition: transform 1.2s cubic-bezier(0.4, 0.2, 0.2, 1);
+                            transform-style: preserve-3d; cursor: pointer;
+                        }}
+                        /* Η κλάση που γυρνάει την κάρτα */
+                        .flipped {{ transform: rotateY(180deg); }}
+                        
+                        .flip-card-front, .flip-card-back {{
+                            position: absolute; width: 100%; height: 100%;
+                            -webkit-backface-visibility: hidden; backface-visibility: hidden;
+                            border-radius: 16px; display: flex; flex-direction: column;
+                            justify-content: center; align-items: center; padding: 25px;
+                            box-sizing: border-box; box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+                        }}
+                        /* Σκοτεινή πλευρά (Δύσκολη Σκέψη) */
+                        .flip-card-front {{
+                            background: linear-gradient(135deg, #4c4c4c 0%, #2a2a2a 100%);
+                            color: #f1f1f1; border: 1px solid #555;
+                        }}
+                        /* Φωτεινή πλευρά (Φροντίδα - LLM) */
+                        .flip-card-back {{
+                            background: linear-gradient(135deg, #ffffff 0%, #f3f0fb 100%);
+                            color: #4A3D73; border: 2px solid #b19cd9;
+                            transform: rotateY(180deg);
+                        }}
+                        .hint {{ font-size: 13px; opacity: 0.6; margin-top: 15px; font-weight: 400; }}
+                        .front-text {{ font-size: 19px; font-weight: 500; font-style: italic; }}
+                        .back-text {{ font-size: 16px; line-height: 1.6; font-weight: 500; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="flip-card" onclick="this.querySelector('.flip-card-inner').classList.toggle('flipped')">
+                        <div class="flip-card-inner">
+                            <div class="flip-card-front">
+                                <div class="front-text">«{safe_thought}»</div>
+                                <div class="hint">Περίμενε...</div>
+                            </div>
+                            <div class="flip-card-back">
+                                <div class="back-text">{safe_msg}</div>
+                                <div class="hint">✨ Κάνε κλικ για να γυρίσεις την κάρτα</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <script>
+                        // Αυτόματο γύρισμα μετά από 1.2 δευτερόλεπτα για να αποκαλυφθεί η απάντηση!
+                        setTimeout(() => {{
+                            const card = document.querySelector('.flip-card-inner');
+                            card.classList.add('flipped');
+                            document.querySelector('.flip-card-front .hint').innerText = "👆 Κάνε κλικ";
+                        }}, 1200);
+                    </script>
+                </body>
+                </html>
+                """,
+                height=260,
+            )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -2473,7 +3257,7 @@ with tab_reframe:
 
 
 # ============================================================
-# ΠΡΟΦΙΛ TAB
+# ΠΡΟΦΙΛ TAB (Interactive Glass Dashboard - Minimal)
 # ============================================================
 
 with tab_profile:
@@ -2481,7 +3265,7 @@ with tab_profile:
         """
         <div class="page-header">
           <h1 class='page-title'>🌿 Προφίλ Φροντίδας</h1>
-          <p class='page-subtitle'>Μερικές πληροφορίες που βοηθούν να καταλαβαίνω καλύτερα το πλαίσιο σου.</p>
+          <p class='page-subtitle'>Μοιράσου όσα νιώθεις άνετα. Όσο πιο πολύ σε γνωρίζω, τόσο πιο σωστά θα σε υποστηρίζω.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2489,174 +3273,275 @@ with tab_profile:
 
     profile = load_profile()
 
+    # --- ΚΕΝΤΡΙΚΗ ΠΕΡΙΟΧΗ (Glass Wrapper) ---
     st.markdown("<div class='main-wrapper'>", unsafe_allow_html=True)
-    st.markdown("### 📝 Βασικά στοιχεία")
+    
+    # Ενότητα 1: Ταυτότητα
+    st.markdown("<h3 style='color: #4A3D73; font-size: 1.1rem; border-bottom: 2px solid rgba(212, 190, 250, 0.3); padding-bottom: 8px; margin-top: 0;'>👤 Ποιος/α είσαι;</h3>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([2, 1, 2])
+    with col1:
+        name = st.text_input("Όνομα ή ψευδώνυμο", value=profile.get("name", ""))
+    with col2:
+        stored_age = profile.get("age", 0)
+        try:
+            stored_age = int(stored_age)
+        except:
+            stored_age = 0
+        age = st.number_input("Ηλικία (προαιρετικό)", min_value=0, max_value=120, value=stored_age, step=1)
+    with col3:
+        context = st.text_input("Ρόλος/Ασχολία (π.χ. φοιτητής, υπάλληλος)", value=profile.get("context", ""))
 
-    name = st.text_input("Όνομα ή ψευδώνυμο", value=profile.get("name", ""))
+    age_range = infer_age_range(age) if age else profile.get("age_range", "")
 
-    stored_age = profile.get("age", 0)
-    try:
-        stored_age = int(stored_age)
-    except (TypeError, ValueError):
-        stored_age = 0
+    # Ενότητα 2: Εσωτερικός Κόσμος
+    st.markdown("<h3 style='color: #4A3D73; font-size: 1.1rem; border-bottom: 2px solid rgba(212, 190, 250, 0.3); padding-bottom: 8px; margin-top: 30px;'>🧭 Στόχοι & Δυσκολίες</h3>", unsafe_allow_html=True)
+    col_g1, col_g2 = st.columns(2)
+    with col_g1:
+        main_goals = st.text_area("Ποιοι είναι οι βασικοί σου στόχοι ευεξίας;", value=profile.get("main_goals", ""), height=120)
+    with col_g2:
+        main_struggles = st.text_area("Τι σε δυσκολεύει περισσότερο τον τελευταίο καιρό;", value=profile.get("main_struggles", ""), height=120)
+    
+    helpful_things = st.text_area("Τι σε βοηθά συνήθως να νιώσεις καλύτερα (ακόμη κι αν είναι κάτι μικρό);", value=profile.get("helpful_things", ""), height=80)
 
-    age = st.number_input("Ηλικία (προαιρετικό)", min_value=0, max_value=120, value=stored_age, step=1)
+    # Ενότητα 3: Προτιμήσεις AI
+    st.markdown("<h3 style='color: #4A3D73; font-size: 1.1rem; border-bottom: 2px solid rgba(212, 190, 250, 0.3); padding-bottom: 8px; margin-top: 30px;'>🤖 Προτιμήσεις Αλληλεπίδρασης</h3>", unsafe_allow_html=True)
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        preferred_tone = st.text_area("Πώς θες να σου μιλάω; (π.χ. πρακτικός, ζεστός, άμεσος)", value=profile.get("preferred_tone", ""), height=100)
+    with col_p2:
+        triggers = st.text_area("Θέματα ή λέξεις που προτιμάς να αποφεύγουμε;", value=profile.get("triggers", ""), height=100)
+    
+    soothing_things = st.text_area("Υπάρχουν εικόνες, σκέψεις ή συνήθειες που σε ηρεμούν;", value=profile.get("soothing_things", ""), height=80)
 
-    computed_age_range = infer_age_range(age)
-    if computed_age_range:
-        age_range = computed_age_range
-        st.caption(f"Ηλικιακή ομάδα (υπολογισμένη): **{age_range}**")
-    else:
-        age_range = profile.get("age_range", "")
-        if age_range:
-            st.caption(f"Αποθηκευμένη ηλικιακή ομάδα: **{age_range}**")
-        else:
-            st.caption("Αν συμπληρώσεις ηλικία, η εφαρμογή υπολογίζει ηλικιακή ομάδα (18–24, 25–34, 35–44, 45+).")
-
-    context = st.text_input(
-        "Πλαίσιο ζωής / ρόλος (π.χ. φοιτητής, εργαζόμενος)",
-        value=profile.get("context", ""),
-    )
-
-    st.markdown("---")
-    st.markdown("### 🎯 Στόχοι")
-    main_goals = st.text_area(
-        "Ποιοι είναι οι βασικοί σου στόχοι ευεξίας αυτή την περίοδο;",
-        value=profile.get("main_goals", ""),
-        height=100,
-    )
-
-    st.markdown("---")
-    st.markdown("### Δυσκολίες & ανάγκες")
-    main_struggles = st.text_area(
-        "Τι σε δυσκολεύει περισσότερο τον τελευταίο καιρό;",
-        value=profile.get("main_struggles", ""),
-        height=110,
-    )
-    helpful_things = st.text_area(
-        "Τι σε βοηθά συνήθως (ακόμη κι αν είναι μικρό);",
-        value=profile.get("helpful_things", ""),
-        height=90,
-    )
-
-    st.markdown("---")
-    st.markdown("### 💜 Συναισθηματικές προτιμήσεις")
-    preferred_tone = st.text_area(
-        "Πώς θα ήθελες να σου μιλάει η εφαρμογή;",
-        value=profile.get("preferred_tone", ""),
-        height=80,
-    )
-    triggers = st.text_area(
-        "Υπάρχουν θέματα ή λέξεις που θα προτιμούσες να αποφεύγονται;",
-        value=profile.get("triggers", ""),
-        height=80,
-    )
-    soothing_things = st.text_area(
-        "Ποια πράγματα σε ηρεμούν συνήθως όταν ζορίζεσαι;",
-        value=profile.get("soothing_things", ""),
-        height=80,
-    )
-
-    st.markdown("---")
-
-    if st.button("💾 Αποθήκευση προφίλ"):
-        new_profile = {
-            "name": name,
-            "age": int(age) if age else 0,
-            "age_range": age_range,
-            "context": context,
-            "main_goals": main_goals,
-            "main_struggles": main_struggles,
-            "helpful_things": helpful_things,
-            "preferred_tone": preferred_tone,
-            "triggers": triggers,
-            "soothing_things": soothing_things,
-        }
-        save_profile(new_profile)
-        st.success("Το προφίλ σου αποθηκεύτηκε επιτυχώς 🙂")
-
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # --- ΚΟΥΜΠΙ ΑΠΟΘΗΚΕΥΣΗΣ ΚΕΝΤΡΑΡΙΣΜΕΝΟ ---
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+    with col_btn2:
+        if st.button("💾 Αποθήκευση & Ενημέρωση Προφίλ", use_container_width=True):
+            new_profile = {
+                "name": name,
+                "age": int(age) if age else 0,
+                "age_range": age_range,
+                "context": context,
+                "main_goals": main_goals,
+                "main_struggles": main_struggles,
+                "helpful_things": helpful_things,
+                "preferred_tone": preferred_tone,
+                "triggers": triggers,
+                "soothing_things": soothing_things,
+            }
+            save_profile(new_profile)
+            
+            # Μήνυμα επιτυχίας
+            st.markdown(
+                """
+                <div style="background: #baf7c3; color: #158047; padding: 15px; border-radius: 12px; 
+                            text-align: center; font-weight: 600; margin-top: 15px; border: 1px solid #99deb0;
+                            box-shadow: 0 4px 15px rgba(21, 128, 71, 0.15); animation: cardFadeIn 0.5s;">
+                    ✨ Το προφίλ σου ενημερώθηκε!
+                </div>
+                """, unsafe_allow_html=True
+            )
+            
     st.markdown("</div>", unsafe_allow_html=True)
 
-
 # ============================================================
-# ΣΥΝΔΕΣΗ ΑΠΟ ΚΙΝΗΤΟ TAB
+# ΣΥΝΔΕΣΗ ΑΠΟ ΚΙΝΗΤΟ TAB (Interactive Scanner UI)
 # ============================================================
 
 with tab_mobile:
+    import base64
+    from io import BytesIO
+
     st.markdown(
         """
         <div class="page-header">
           <h1 class='page-title'>📱 Σύνδεση από κινητό</h1>
           <p class='page-subtitle'>
-            Άνοιξε την εφαρμογή του Project Wellness και στο κινητό σου, όσο είσαι στο ίδιο Wi-Fi με τον υπολογιστή.
+            Συνέχισε την ίδια συνεδρία στο κινητό σου, μέσα από το τοπικό σου δίκτυο.
           </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    # Δημιουργία URL και QR Image
     local_url = get_local_url(port=8501)
     qr_img = generate_qr_image(local_url)
+    
+    # Μετατροπή της εικόνας QR σε Base64 για ενσωμάτωση στην HTML
+    buffered = BytesIO()
+    qr_img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
 
-    st.markdown("<div class='qr-page-wrapper'>", unsafe_allow_html=True)
-    col_left, col_right = st.columns([1.1, 1])
-
-    with col_left:
-        st.markdown(
-            """
-            <div class="qr-main-card">
-              <div class="qr-badge">Local only</div>
-              <div class="qr-title">Σκάναρε το QR από το κινητό σου</div>
-              <p class="qr-subtitle">
-                Άνοιξε την κάμερα στο κινητό και στόχευσε το QR.
-                Αν δεν ανοίξει αυτόματα, χρησιμοποίησε app ανάγνωσης QR.
-              </p>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.image(qr_img, width=170)
-        st.markdown(
-            f"""
-              <div class="qr-url-chip">{local_url}</div>
-              <p class="qr-note">
-                Αν δεν δουλέψει το QR, γράψε χειροκίνητα αυτή τη διεύθυνση στον browser του κινητού.
-              </p>
+    # Το Interactive QR Scanner Component
+    components.html(f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            body {{
+                margin: 0; padding: 20px;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: transparent;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }}
+            .qr-container {{
+                background: rgba(255, 255, 255, 0.45);
+                backdrop-filter: blur(24px);
+                -webkit-backdrop-filter: blur(24px);
+                border: 1px solid rgba(255, 255, 255, 0.7);
+                border-radius: 24px;
+                padding: 40px;
+                max-width: 800px;
+                width: 100%;
+                box-shadow: 0 15px 40px rgba(108, 90, 158, 0.08);
+                display: flex;
+                gap: 40px;
+                align-items: center;
+                animation: cardFadeIn 0.8s ease-out;
+            }}
+            @media (max-width: 768px) {{
+                .qr-container {{ flex-direction: column; text-align: center; padding: 30px 20px; gap: 25px; }}
+            }}
+            
+            /* Το Κουτί του QR με το Animation Σάρωσης */
+            .qr-box-wrapper {{
+                position: relative;
+                background: #ffffff;
+                padding: 15px;
+                border-radius: 20px;
+                box-shadow: 0 10px 25px rgba(108, 90, 158, 0.15);
+                flex-shrink: 0;
+                overflow: hidden;
+            }}
+            .qr-box-wrapper img {{
+                display: block;
+                width: 180px;
+                height: 180px;
+                border-radius: 10px;
+            }}
+            /* Η φωτεινή "Laser" γραμμή */
+            .scanner-laser {{
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 3px;
+                background: rgba(183, 157, 242, 0.9);
+                box-shadow: 0 0 15px rgba(183, 157, 242, 0.9), 0 0 30px rgba(183, 157, 242, 0.6);
+                animation: scan 2.5s infinite alternate ease-in-out;
+            }}
+            @keyframes scan {{
+                0% {{ top: 5%; opacity: 0; }}
+                10% {{ opacity: 1; }}
+                90% {{ opacity: 1; }}
+                100% {{ top: 95%; opacity: 0; }}
+            }}
+            @keyframes cardFadeIn {{
+                from {{ opacity: 0; transform: translateY(15px); }}
+                to {{ opacity: 1; transform: translateY(0); }}
+            }}
+            
+            /* Περιοχή κειμένου & κουμπιών */
+            .info-area {{ flex-grow: 1; }}
+            
+            .badge {{
+                display: inline-block; padding: 6px 14px; border-radius: 20px;
+                font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+                background: linear-gradient(135deg, #e4d4ff, #f2eaff); color: #4A3D73;
+                margin-bottom: 15px; border: 1px solid rgba(183, 157, 242, 0.5);
+                box-shadow: 0 4px 10px rgba(183, 157, 242, 0.2);
+            }}
+            h2 {{ margin: 0 0 10px 0; color: #3b304c; font-size: 24px; }}
+            p {{ color: #73658a; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0; }}
+            
+            /* Input Group για Αντιγραφή του URL */
+            .copy-group {{
+                display: flex; background: rgba(245, 247, 251, 0.6);
+                border: 1px solid rgba(183, 157, 242, 0.4); border-radius: 12px;
+                overflow: hidden; backdrop-filter: blur(5px); transition: all 0.3s;
+            }}
+            .copy-group:focus-within {{
+                border-color: #b79df2; box-shadow: 0 0 0 2px rgba(183, 157, 242, 0.2);
+            }}
+            .copy-input {{
+                flex-grow: 1; background: transparent; border: none; padding: 12px 15px;
+                color: #4A3D73; font-family: monospace; font-size: 14px; outline: none;
+            }}
+            .copy-btn {{
+                background: #e4d4ff; color: #4A3D73; border: none; padding: 0 20px;
+                font-weight: 600; cursor: pointer; transition: all 0.3s;
+            }}
+            .copy-btn:hover {{ background: #d4befa; }}
+            .copy-btn.success {{ background: #baf7c3; color: #158047; }}
+        </style>
+    </head>
+    <body>
+        <div class="qr-container">
+            <div class="qr-box-wrapper">
+                <!-- Εδώ μπαίνει το QR code από την Python -->
+                <img src="data:image/png;base64,{img_str}" alt="QR Code">
+                <!-- Η γραμμή σάρωσης -->
+                <div class="scanner-laser"></div>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_right:
-        st.markdown(
-            """
-            <div class="qr-side-card">
-              <h3 class="qr-side-title">Πώς λειτουργεί;</h3>
-              <ol class="qr-steps">
-                <li>Υπολογιστής και κινητό στο ίδιο Wi-Fi.</li>
-                <li>Άφησε ανοιχτή την εφαρμογή στον υπολογιστή.</li>
-                <li>Σκάναρε το QR ή γράψε τη διεύθυνση χειροκίνητα.</li>
-              </ol>
-              <p class="qr-side-note">
-                Η εφαρμογή τρέχει τοπικά. Τα δεδομένα δεν ανεβαίνουν σε εξωτερικό server.
-              </p>
+            
+            <div class="info-area">
+                <div class="badge">🌐 Τοπικο Δικτυο</div>
+                <h2>Συνδέσου από το κινητό</h2>
+                <p>
+                    Άνοιξε την κάμερα του κινητού σου και σκάναρε τον κωδικό. 
+                    Θα μεταφερθείς απευθείας στο Project Wellness, με την προϋπόθεση 
+                    ότι και οι δύο συσκευές είναι στο <b>ίδιο δίκτυο Wi-Fi</b>.
+                </p>
+                
+                <div class="copy-group">
+                    <input type="text" class="copy-input" id="urlInput" value="{local_url}" readonly>
+                    <button class="copy-btn" id="copyBtn" onclick="copyUrl()">Αντιγραφή</button>
+                </div>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        </div>
+        
+        <script>
+            // Λειτουργία JavaScript για το κουμπί Αντιγραφής
+            function copyUrl() {{
+                const input = document.getElementById('urlInput');
+                const btn = document.getElementById('copyBtn');
+                
+                // Επιλογή του κειμένου & αντιγραφή στο πρόχειρο
+                input.select();
+                document.execCommand('copy');
+                
+                // Αλλαγή στυλ του κουμπιού σε "Επιτυχία"
+                btn.innerHTML = 'Αντιγράφηκε! ✓';
+                btn.classList.add('success');
+                
+                // Επαναφορά στην αρχική μορφή μετά από 2 δευτερόλεπτα
+                setTimeout(() => {{
+                    btn.innerHTML = 'Αντιγραφή';
+                    btn.classList.remove('success');
+                }}, 2000);
+            }}
+        </script>
+    </body>
+    </html>
+    """, height=380)
 
 
 # ============================================================
-# ΣΧΕΤΙΚΑ & ΑΣΦΑΛΕΙΑ TAB
+# ΣΧΕΤΙΚΑ & ΑΣΦΑΛΕΙΑ TAB (Glassmorphism Dashboard)
 # ============================================================
 
 with tab_info:
     st.markdown(
         """
         <div class="page-header">
-          <h1 class='page-title'>ℹ️ Σχετικά &amp; Ασφάλεια</h1>
-          <p class='page-subtitle'>Πώς λειτουργεί το Project Wellness και πώς σε προστατεύει.</p>
+          <h1 class='page-title'>🛡️ Σχετικά & Ασφάλεια</h1>
+          <p class='page-subtitle'>Διαφάνεια, σεβασμός στα δεδομένα σου και εργαλεία υποστήριξης.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2664,64 +3549,70 @@ with tab_info:
 
     st.markdown("<div class='main-wrapper'>", unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <div class="info-card">
-          <h3 class="info-title">🔐 Μέτρα Ασφαλείας</h3>
-          <p>
-            Το Project Wellness αναγνωρίζει λέξεις/φράσεις που μπορεί να δείχνουν έντονη κρίση ή άμεσο κίνδυνο.
-          </p>
-          <p>Σε αυτές τις περιπτώσεις:</p>
-          <ul>
-            <li>σταματά η κανονική ροή</li>
-            <li>εμφανίζεται ειδικό μήνυμα με οδηγίες και πηγές βοήθειας</li>
-          </ul>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Χρησιμοποιούμε 2 στήλες για πιο σύγχρονο, Dashboard layout
+    col_i1, col_i2 = st.columns(2)
 
-    st.markdown(
-        """
-        <div class="info-card">
-          <h3 class="info-title">ℹ️ Πώς λειτουργεί</h3>
-          <p>
-            Συνδυάζει απλούς κανόνες (διάθεση/ύπνος/νερό + λέξεις-κλειδιά) με υποστηρικτική γλώσσα.
-          </p>
-          <p>
-            Δεν κάνει διάγνωση, δεν δίνει ιατρικές οδηγίες και δεν αντικαθιστά επαγγελματία ψυχικής υγείας.
-          </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with col_i1:
+        st.markdown(
+            f"""<div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; padding: 25px; height: 100%; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08); animation: cardFadeIn 0.4s ease-out;">
+<h3 style="color: #4A3D73; font-size: 1.2rem; margin-top: 0; display: flex; align-items: center; gap: 8px;">🧠 Πώς Λειτουργεί</h3>
+<p style="color: #73658a; line-height: 1.6; font-size: 0.95rem;">
+Το Project Wellness χρησιμοποιεί προηγμένη Τεχνητή Νοημοσύνη, ρυθμισμένη να απαντά με τη <strong>Μαιευτική Μέθοδο (Socratic Questioning)</strong>. 
+Δεν δίνει έτοιμες, ρομποτικές λύσεις, αλλά σε βοηθά να αναγνωρίσεις γνωστικές παγίδες και να βρεις τις δικές σου απαντήσεις μέσα από στοχευμένες ερωτήσεις.
+</p>
+</div>""", 
+            unsafe_allow_html=True
+        )
 
-    st.markdown(
-        """
-        <div class="info-card">
-          <h3 class="info-title">☎️ Γραμμές Βοήθειας (Ελλάδα)</h3>
-          <ul>
-            <li><strong>112</strong> – Άμεση ανάγκη</li>
-            <li><strong>1018</strong> – Γραμμή Παρέμβασης για την Αυτοκτονία (24/7)</li>
-            <li><strong>10306</strong> – Γραμμή Ψυχοκοινωνικής Υποστήριξης</li>
-            <li><strong>1056</strong> – Για ανηλίκους (Το Χαμόγελο του Παιδιού)</li>
-          </ul>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        st.markdown("<br>", unsafe_allow_html=True)
 
+        st.markdown(
+            f"""<div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; padding: 25px; height: 100%; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08); animation: cardFadeIn 0.6s ease-out;">
+<h3 style="color: #4A3D73; font-size: 1.2rem; margin-top: 0; display: flex; align-items: center; gap: 8px;">🚨 Μέτρα Ασφαλείας</h3>
+<p style="color: #73658a; line-height: 1.6; font-size: 0.95rem;">
+Το σύστημα διαθέτει μηχανισμούς ανίχνευσης λέξεων-κλειδιών. Αν αντιληφθεί ένδειξη κρίσης ή κινδύνου, 
+σταματά την κανονική ροή συζήτησης και ενεργοποιεί ένα <strong>ειδικό πρωτόκολλο ασφαλείας</strong> με πηγές άμεσης βοήθειας.
+</p>
+</div>""", 
+            unsafe_allow_html=True
+        )
+
+    with col_i2:
+        st.markdown(
+            f"""<div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; padding: 25px; height: 100%; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08); animation: cardFadeIn 0.5s ease-out;">
+<h3 style="color: #4A3D73; font-size: 1.2rem; margin-top: 0; display: flex; align-items: center; gap: 8px;">🔒 Απόρρητο Δεδομένων</h3>
+<p style="color: #73658a; line-height: 1.6; font-size: 0.95rem;">
+Το ιστορικό σου αποθηκεύεται <strong>τοπικά</strong> στον υπολογιστή σου (στο αρχείο <code>user_data.csv</code>) και δεν ανεβαίνει σε κάποια εξωτερική βάση δεδομένων. 
+Τα δεδομένα που στέλνονται στο API του OpenAI είναι κρυπτογραφημένα και <strong>δεν</strong> χρησιμοποιούνται για την εκπαίδευση μελλοντικών μοντέλων τους.
+</p>
+</div>""", 
+            unsafe_allow_html=True
+        )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Κάρτα Γραμμών Βοήθειας (Πιο έντονο ροζ/κόκκινο πλαίσιο για να τραβάει την προσοχή)
+        st.markdown(
+            f"""<div style="background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid #ffcad4; border-radius: 16px; padding: 25px; height: 100%; box-shadow: 0 12px 40px rgba(255, 105, 180, 0.12); border-left: 5px solid #ff758f; animation: cardFadeIn 0.7s ease-out;">
+<h3 style="color: #c12530; font-size: 1.2rem; margin-top: 0; display: flex; align-items: center; gap: 8px;">☎️ Γραμμές Βοήθειας (24/7)</h3>
+<ul style="color: #4A3D73; line-height: 1.8; font-size: 0.95rem; padding-left: 20px; font-weight: 500;">
+    <li><strong>112</strong> – Άμεση ανάγκη (Πανευρωπαϊκός)</li>
+    <li><strong>1018</strong> – Γραμμή Παρέμβασης για την Αυτοκτονία</li>
+    <li><strong>10306</strong> – Γραμμή Ψυχοκοινωνικής Υποστήριξης</li>
+    <li><strong>1056</strong> – Το Χαμόγελο του Παιδιού</li>
+</ul>
+</div>""", 
+            unsafe_allow_html=True
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Disclaimer Box στο κάτω μέρος
     st.markdown(
-        """
-        <div class="info-card">
-          <h3 class="info-title"> Σημαντικό</h3>
-          <p>
-            Το Project Wellness είναι εργαλείο αυτοβοήθειας και ψυχοεκπαίδευσης.
-            Δεν αντικαθιστά ψυχολόγο/ψυχίατρο/υπηρεσίες έκτακτης ανάγκης.
-          </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+        f"""<div style="text-align: center; color: #73658a; font-size: 0.85rem; padding: 20px; background: rgba(245, 247, 251, 0.6); border-radius: 12px; border: 1px solid rgba(183, 157, 242, 0.3);">
+<strong>⚠️ Σημαντική Υπενθύμιση:</strong> Το Project Wellness είναι ένα πειραματικό εργαλείο αυτοβοήθειας. Σε καμία περίπτωση δεν υποκαθιστά την κλινική διάγνωση, τον ψυχολόγο ή τον ψυχίατρο.
+</div>""", 
+        unsafe_allow_html=True
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
