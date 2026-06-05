@@ -1,14 +1,13 @@
 import os
 import json
-import streamlit as st  # ΠΡΟΣΘΗΚΗ: Για να διαβάζει τα Secrets
+import streamlit as st 
 from typing import Optional, Dict, Any, List
 
 try:
     from openai import OpenAI
 except ImportError:
-    OpenAI = None  # type: ignore
-
-# ΔΙΟΡΘΩΣΗ: Πρώτα κοιτάμε στα Secrets του Streamlit και μετά στο .env
+    OpenAI = None  
+ 
 try:
     API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
 except Exception:
@@ -28,7 +27,7 @@ def _build_client() -> Optional["OpenAI"]:
     if not API_KEY:
         return None
     try:
-        # Διασφαλίζουμε ότι χρησιμοποιούμε το API_KEY που βρήκαμε παραπάνω
+        
         return OpenAI(api_key=API_KEY)
     except Exception:
         return None
@@ -81,7 +80,7 @@ def _build_system_prompt(
     profile: Dict[str, Any],
     active_mode: Optional[str] = None,
 ) -> str:
-    # Το Απόλυτο Evidence-Based Persona
+    
     base = (
         "Είσαι ένας έμπειρος ψυχολόγος που βασίζει τις παρεμβάσεις του αυστηρά σε Τεκμηριωμένες Πρακτικές (Evidence-Based Practices). "
         "Ενσωματώνεις αρμονικά στοιχεία από: Γνωσιακή Συμπεριφορική Θεραπεία (CBT), Θεραπεία Αποδοχής και Δέσμευσης (ACT), "
@@ -157,7 +156,7 @@ def llm_therapeutic_reply(
 
 
 # =========================================================
-# FOLLOW-UP FOR EXERCISES (word-choice etc.)
+# FOLLOW-UP FOR EXERCISES 
 # =========================================================
 def llm_exercise_followup(
     chosen_word: str,
@@ -298,7 +297,7 @@ def llm_update_memory(
 
 
 # =========================================================
-# MICRO PROMPTS (for Exercises buttons)
+# MICRO PROMPTS 
 # =========================================================
 _MICRO_FALLBACKS: Dict[str, List[str]] = {
     "support_phrase": [

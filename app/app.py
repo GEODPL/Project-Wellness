@@ -35,13 +35,13 @@ from datetime import datetime
 # ΠΡΟΣΩΠΙΚΟ ΠΡΟΦΙΛ ΧΡΗΣΤΗ 
 # ===========================================================
 def _get_profile_path():
-    # Βρίσκουμε ποιος χρήστης είναι συνδεδεμένος
+    # ποιος χρήστης είναι συνδεδεμένος;
     email = (st.session_state.get("user_email") or "").strip().lower()
     if not email:
         email = (st.session_state.get("user_name") or "anon").strip().lower()
     key = email or "anon"
     
-    # Φτιάχνουμε ένα μοναδικό, κρυφό όνομα αρχείου (π.χ. profile_a7b9c.json)
+    # Φτιάχνουμε ένα μοναδικό, κρυφό όνομα αρχείου
     h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
     base_dir = os.path.dirname(__file__)
     return os.path.join(base_dir, f"profile_{h}.json")
@@ -107,10 +107,6 @@ def generate_qr_image(url: str) -> Image.Image:
 
 
 # ============================================================
-# SMALL HELPERS
-# ============================================================
-
-# ============================================================
 # NARRATIVE CONTINUITY + MODE BLENDING + EXPLAINABLE LAYER
 # ============================================================
 
@@ -174,7 +170,7 @@ def detect_phase_and_closure(text: str) -> Tuple[str, bool, List[str]]:
         signals.append("Πρώτο turn → opening")
         return "opening", False, signals
 
-    # closure heuristic 
+ 
     closing_phrases = [
         "ευχαρισ", "οκ", "ok", "εντάξει", "τελ", "τέλος", "αυτά", "τα λεμε", "τα λέμε",
         "καληνυχ", "bye", "αντίο", "αντιο"
@@ -186,13 +182,13 @@ def detect_phase_and_closure(text: str) -> Tuple[str, bool, List[str]]:
         signals.append("Σύντομο μήνυμα + closing token → closing")
         return "closing", True, signals
 
-    # deepening heuristics (αυτοαναφορά + έντονα συναισθήματα + μοτίβα)
+
     deep_tokens = ["φοβά", "ντρέπ", "ενοχ", "ενοχή", "νιωθ", "πονά", "δεν αντέχ", "πανικ", "άγχ"]
     if any(tok in t for tok in deep_tokens) and len(t) > 80:
         signals.append("Μεγάλο μήνυμα + affect tokens → deepening")
         return "deepening", False, signals
 
-    # exploration default
+
     signals.append("Default → exploration")
     return "exploration", False, signals
 
@@ -213,7 +209,7 @@ def compute_mode_weights(text: str, mood: int, sleep: int, water: int) -> Tuple[
         "relationships": _score_keywords(t, MODES["relationships"]["keywords"]),
     }
 
-    # boosts 
+     
     for p in MODES["student"].get("linguistic_patterns", []):
         if p in t:
             raw["student"] += 2
@@ -232,12 +228,12 @@ def compute_mode_weights(text: str, mood: int, sleep: int, water: int) -> Tuple[
         raw["relationships"] += 2
         signals.append("Relationships boost: relational distress tokens")
 
-    # baseline from check-in if strained
+
     if looks_a_bit_strained(mood, sleep, water):
         raw["sleep"] += 1
         signals.append("Baseline: strained check-in → +sleep weight")
 
-    # if everything is zero, keep neutral distribution but slightly favor sleep (safety)
+
     total = sum(raw.values())
     if total <= 0:
         signals.append("No strong keywords → fallback weights")
@@ -510,18 +506,18 @@ Mode: {active_mode}
         remember_bot_output(closing)
         decision_trace.append("Wrap-up: παρήχθη σύνοψη/συμπεράσματα μέσω LLM.")
     else:
-        # fallback κλείσιμο 
+         
         closing_rb = "Σε ευχαριστώ που το μοιράστηκες. Κράτα ένα μικρό, πρακτικό βήμα για σήμερα και πήγαινε απαλά."
         st.session_state.messages.append(("bot", closing_rb))
         remember_bot_output(closing_rb)
         decision_trace.append("Wrap-up: LLM δεν επέστρεψε αποτέλεσμα → απλό fallback κλείσιμο.")
 
-    # 2) Συναισθηματικός χάρτης
+    
     map_html = render_emotional_map(mood_value, sleep, water, last_user_text)
     st.session_state.messages.append(("map", map_html))
     decision_trace.append("Wrap-up: προστέθηκε συναισθηματικός χάρτης.")
 
-    # 3) Άσκηση ημέρας
+    
     ex = exercise_suggestion(mood_value, sleep, water, last_user_text)
     st.session_state.messages.append(("exercise", ex))
     decision_trace.append("Wrap-up: προστέθηκε μικρή άσκηση ημέρας.")
@@ -701,7 +697,7 @@ def mode_relational_exercise(text: str) -> str:
 
 
 # ============================================================
-# THOUGHT REFRAME (Rule-based)
+# THOUGHT REFRAME (Rule-based) !Still!
 # ============================================================
 
 def generate_reframe(thought: str, pattern: str) -> str:
@@ -1083,7 +1079,7 @@ with tab_chat:
             if relational_boost:
                 scores["relationships"] += 2
 
-            # baseline όταν όλα 0
+            
             if all(v == 0 for v in scores.values()):
                 if sleep <= 6:
                     scores["sleep"] = 2
@@ -1494,7 +1490,7 @@ ANTI-REPEAT:
                 
                 st.rerun()
 
-        # ΜΕΤΑΦΟΡΑ SLIDERS ΜΕΣΑ ΣΕ EXPANDER
+        # ΜΕΤΑΦΟΡΑ SLIDERS ΣΕ EXPANDER
         with st.expander("📊 Σημερινό Check-in (Διάθεση, Ύπνος, Νερό)", expanded=True):
             colA, colB, colC = st.columns(3)
             with colA:
@@ -1531,7 +1527,7 @@ ANTI-REPEAT:
                 unsafe_allow_html=True,
             )
 
-        # RENDER CHAT HISTORY ΕΔΩ ΠΑΝΩ! 
+        # RENDER CHAT HISTORY ΕΔΩ ΠΑΝΩ
         for sender, content in st.session_state.messages:
             if sender == "user":
                 render_message("user", content)
@@ -1733,7 +1729,7 @@ ANTI-REPEAT:
                 )
                 st.session_state.support_indicator_history = st.session_state.support_indicator_history[-30:]
 
-                # 8) Closure → Wrap-up bundle 
+                # 8) 
                 closing_now = _detect_dialogue_closure(text)
                 if closing_now and not st.session_state.wrapup_done:
                     decision_trace.append("Closure detected: run wrap-up bundle.")
@@ -1795,11 +1791,6 @@ ANTI-REPEAT:
         )
 
         st.markdown("</div></div>", unsafe_allow_html=True) 
-
-
-# ============================================================
-# ΙΣΤΟΡΙΚΟ TAB 
-# ============================================================
 
 # ============================================================
 # ΙΣΤΟΡΙΚΟ TAB (Interactive Glass Timeline)
@@ -1881,7 +1872,7 @@ with tab_history:
                     ts = row.get("timestamp", "")
                     if pd.notna(ts) and str(ts).strip():
                         try:
-                            # Μορφοποίηση ημερομηνίας πιο κομψά (π.χ. 15 May 2026 • 20:30)
+                            # Μορφοποίηση ημερομηνίας (π.χ. 15 May 2026 • 20:30)
                             ts_str = pd.to_datetime(ts).strftime("%d %b %Y • %H:%M")
                         except Exception:
                             ts_str = str(ts)
@@ -1926,7 +1917,7 @@ with tab_history:
                 # Μετατροπή της λίστας σε JSON string για να το διαβάσει η JS
                 timeline_json = json.dumps(timeline_data, ensure_ascii=False)
                 
-                # Το υπερ-ρεαλιστικό Timeline (HTML / CSS / JavaScript)
+                # Το υπερ-ρεαλιστικό Timeline 
                 components.html(f"""
                 <!DOCTYPE html>
                 <html>
@@ -2121,7 +2112,7 @@ with tab_stats:
                 if "timestamp" in df.columns:
                     df = df.sort_values("timestamp")
 
-                df_last = df.tail(15).copy() # Παίρνουμε τα τελευταία 15 για πιο καθαρά διαγράμματα
+                df_last = df.tail(15).copy() # Μεγαλυτερη διαφανεια
 
                 for col in ["mood", "sleep", "water"]:
                     df_last[col] = pd.to_numeric(df_last[col], errors="coerce").fillna(0)

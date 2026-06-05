@@ -5,15 +5,15 @@
 :root {
   --bg-gradient-start: #f6f3ff;
   --bg-gradient-end:   #fdfcff;
-  --card-bg:           rgba(255, 255, 255, 0.45); /* Πιο διάφανο για εφέ γυαλιού */
+  --card-bg:           rgba(255, 255, 255, 0.45); 
   --card-soft-bg:      rgba(255, 255, 255, 0.35);
   --accent:            #d4befa;
   --accent-soft:       rgba(212, 190, 250, 0.2);
   --accent-strong:     #b79df2;
-  --text-main:         #3b304c; /* Σκούρο δαμασκηνί/λιλά για καθαρή ανάγνωση */
+  --text-main:         #3b304c;
   --text-soft:         #73658a;
-  --border-subtle:     rgba(255, 255, 255, 0.6); /* Λευκό περίγραμμα γυαλιού */
-  --shadow-soft:       0 12px 40px rgba(108, 90, 158, 0.08); /* Απαλή λιλά σκιά */
+  --border-subtle:     rgba(255, 255, 255, 0.6); 
+  --shadow-soft:       0 12px 40px rgba(108, 90, 158, 0.08); 
   --radius-xl:         22px;
   --radius-pill:       999px;
   --transition-fast:   160ms ease-out;
@@ -130,14 +130,14 @@ html, body {
 .reframe-card,
 .qr-page-wrapper {
   background: var(--card-bg) !important;
-  backdrop-filter: blur(24px) saturate(160%); /* Έντονο θόλωμα για το γυαλί */
+  backdrop-filter: blur(24px) saturate(160%); 
   -webkit-backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid var(--border-subtle); /* Λευκή αντανάκλαση στις άκρες */
+  border: 1px solid var(--border-subtle); 
   box-shadow: var(--shadow-soft);
   transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s ease;
 }
 
-/* Στρογγυλεμένες γωνίες και padding (Γενικές ρυθμίσεις) */
+
 .main-wrapper { margin-top: 0.6rem; padding: 1.2rem 1.4rem 1.4rem; border-radius: 26px; animation: cardFadeIn var(--transition-med); }
 .chat-card { border-radius: 26px; padding: 1.4rem 1.2rem 1.4rem; }
 .info-card, .plan-card, .emergency-block { border-radius: 22px; padding: 1.1rem 1.2rem; margin-bottom: 0.9rem; }
@@ -149,7 +149,6 @@ html, body {
 .qr-page-wrapper { margin-top: 0.6rem; padding: 1.2rem 1.4rem 1.4rem; border-radius: 30px; }
 .qr-side-card { border-radius: 26px; padding: 1rem 1.1rem 1.1rem; }
 
-/* Απαλή ανύψωση όταν το ποντίκι περνάει από πάνω */
 .chat-card:hover,
 .info-card:hover,
 .plan-card:hover,
@@ -162,7 +161,7 @@ html, body {
 }
 
 /* =========================================================
-   TABS – Ζωντανά μενού (Glassmorphism & Hover Effects)
+   TABS – Ζωντανά μενού 
    ========================================================= */
 
 .stTabs [role="tablist"] {
@@ -228,7 +227,7 @@ html, body {
 }
 
 .chat-bubble-bot, .chat-bot {
-  background: rgba(255, 255, 255, 0.85); /* Ημιδιάφανο λευκό */
+  background: rgba(219, 203, 203, 0.85); /* Ημιδιάφανο λευκό */
   backdrop-filter: blur(10px);
   color: var(--text-main);
   border-bottom-left-radius: 6px;
@@ -429,7 +428,7 @@ textarea:focus,
 .stats-card-main { font-size: 1.4rem; font-weight: 700; color: var(--text-main); }
 .stats-card-sub { font-size: 0.82rem; color: var(--text-soft); }
 
-/* Τα χρώματα στα στατιστικά είναι ελαφρώς ημιδιάφανα για να ταιριάζουν με το γυαλί */
+
 .stats-card-mood { background: linear-gradient(135deg, rgba(228, 212, 255, 0.5), rgba(242, 234, 255, 0.7)) !important; }
 .stats-card-sleep { background: linear-gradient(135deg, rgba(212, 190, 250, 0.3), rgba(183, 157, 242, 0.5)) !important; }
 .stats-card-water { background: linear-gradient(135deg, rgba(186, 247, 195, 0.3), rgba(153, 222, 178, 0.5)) !important; }
@@ -467,7 +466,7 @@ textarea:focus,
 .qr-main-card:hover { transform: translateY(-3px); box-shadow: 0 20px 40px rgba(108, 90, 158, 0.15); }
 
 /* =========================================================
-   TEXT COLOR OVERRIDES (DARK MODE FIXES)
+   TEXT COLOR OVERRIDES (
    ========================================================= */
 
 textarea, .stChatInput textarea { color: #301934 !important; font-weight: 500; }
@@ -477,14 +476,14 @@ textarea::placeholder, input::placeholder { color: #888888 !important; opacity: 
 }
 .stTextInput input, .stTextArea textarea {
   color: #4A3D73 !important;
-  background-color: rgba(255, 255, 255, 0.7) !important; /* Εναρμόνιση text input με το γυαλί */
+  background-color: rgba(255, 255, 255, 0.7) !important; 
   backdrop-filter: blur(5px);
   -webkit-text-fill-color: #4A3D73 !important;
 }
 .footer-disclaimer { margin-top: 1.1rem; font-size: 0.78rem; color: var(--text-soft); }
 
 /* =========================================================
-   ANIMATIONS
+  anm
    ========================================================= */
 
 @keyframes backgroundBreathe {

@@ -2,8 +2,7 @@ import streamlit as st
 import html 
 
 # --------------------------------------------------------
-# Βοηθητικό: ένα wrapper για όλο το thread
-# (το καλεί έμμεσα το app με διαδοχικά render_* calls)
+# Βοηθητικό
 # --------------------------------------------------------
 
 def render_message(sender, content):
