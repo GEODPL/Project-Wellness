@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, Tuple, List
 import streamlit.components.v1 as components
 
 import streamlit as st
+from supabase import create_client, Client
 import pandas as pd
 import qrcode
 from data_logger import log_user_data
@@ -31,40 +32,54 @@ import json
 import hashlib
 from datetime import datetime
 
+# --- ΣΥΝΔΕΣΗ ΜΕ ΤΗ ΒΑΣΗ ΔΕΔΟΜΕΝΩΝ ---
+@st.cache_resource
+def init_supabase() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_supabase()
+
 #============================================================
 # ΠΡΟΣΩΠΙΚΟ ΠΡΟΦΙΛ ΧΡΗΣΤΗ 
 # ===========================================================
-def _get_profile_path():
-    # ποιος χρήστης είναι συνδεδεμένος;
+def _get_user_email():
+    # Βοηθητική συνάρτηση για να βρίσκουμε το email παντού
     email = (st.session_state.get("user_email") or "").strip().lower()
     if not email:
         email = (st.session_state.get("user_name") or "anon").strip().lower()
-    key = email or "anon"
-    
-    # Φτιάχνουμε ένα μοναδικό, κρυφό όνομα αρχείου
-    h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-    base_dir = os.path.dirname(__file__)
-    return os.path.join(base_dir, f"profile_{h}.json")
+    return email or "anon"
 
 def load_profile():
-    # Διαβάζει το προφίλ από το προσωπικό αρχείο του χρήστη (αν υπάρχει)
-    path = _get_profile_path()
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f) or {}
-        except Exception:
+    user_email = _get_user_email()
+    try:
+        response = supabase.table("user_data").select("profile").eq("email", user_email).execute()
+        if len(response.data) > 0:
+            return response.data[0].get("profile", {})
+        else:
+            # Αν δεν υπάρχει, φτιάχνουμε νέα εγγραφή
+            supabase.table("user_data").insert({
+                "email": user_email, 
+                "profile": {}, 
+                "chat_history": {}
+            }).execute()
             return {}
-    return {}
+    except Exception as e:
+        print(f"Supabase load profile error: {e}")
+        return {}
 
 def save_profile(new_profile):
-    # Αποθηκεύει το προφίλ μόνιμα στο προσωπικό αρχείο
-    path = _get_profile_path()
+    user_email = _get_user_email()
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(new_profile, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        # Ενημερώνουμε τη βάση με το νέο προφίλ
+        response = supabase.table("user_data").select("email").eq("email", user_email).execute()
+        if len(response.data) == 0:
+            supabase.table("user_data").insert({"email": user_email, "profile": new_profile, "chat_history": {}}).execute()
+        else:
+            supabase.table("user_data").update({"profile": new_profile}).eq("email", user_email).execute()
+    except Exception as e:
+        print(f"Supabase save profile error: {e}")
 
 
 # ============================================================
@@ -970,35 +985,36 @@ with tab_chat:
             unsafe_allow_html=True,
         )
     else:
-        def _user_key() -> str:
-            email = (st.session_state.get("user_email") or "").strip().lower()
-            if not email:
-                email = (st.session_state.get("user_name") or "anon").strip().lower()
-            return email or "anon"
-
-        def _user_store_path() -> str:
-            base_dir = os.path.dirname(__file__)
-            key = _user_key()
-            h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-            return os.path.join(base_dir, f"chat_state_{h}.json")
 
         def _load_persisted_chat_state() -> dict:
-            path = _user_store_path()
-            if not os.path.exists(path):
-                return {}
+            user_email = _get_user_email()
             try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f) or {}
+                res = supabase.table("user_data").select("chat_history").eq("email", user_email).execute()
+                if len(res.data) > 0 and res.data[0].get("chat_history"):
+                    data = res.data[0]["chat_history"]
+                    if isinstance(data, dict):
+                        return data
+                    elif isinstance(data, list):
+                        return {"messages": data}
+                return {}
             except Exception:
                 return {}
 
         def _save_persisted_chat_state(state: dict) -> None:
-            path = _user_store_path()
+            user_email = _get_user_email()
             try:
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(state, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+                # Διασφαλίζουμε ότι η εγγραφή υπάρχει (αν π.χ. δημιουργήθηκε τώρα)
+                res = supabase.table("user_data").select("email").eq("email", user_email).execute()
+                if len(res.data) == 0:
+                    supabase.table("user_data").insert({
+                        "email": user_email, 
+                        "profile": {}, 
+                        "chat_history": state
+                    }).execute()
+                else:
+                    supabase.table("user_data").update({"chat_history": state}).eq("email", user_email).execute()
+            except Exception as e:
+                print(f"Chat save error: {e}")
 
         # ============================================================
         # Core helpers
@@ -1382,7 +1398,7 @@ ANTI-REPEAT:
         if "chat_loaded_for_user" not in st.session_state:
             st.session_state.chat_loaded_for_user = {}
 
-        ukey = _user_key()
+        ukey = _get_user_email()
         if not st.session_state.chat_loaded_for_user.get(ukey, False):
             persisted = _load_persisted_chat_state()
 
@@ -2364,7 +2380,7 @@ with tab_ex:
     st.markdown(
         """
         <div class="page-header">
-          <h1 class='page-title'>🧘 Μικρή Βιβλιοθήκη Ασκήσεων</h1>
+          <h1 class='page-title'>🧘 Μικρή Βιβλιοθήκη Ασercises</h1>
           <p class='page-subtitle'>
             Μικρές ασκήσεις φροντίδας και ήρεμα διαδραστικά κουμπάκια,
             προσαρμοσμένα σε εσένα.
@@ -3475,9 +3491,7 @@ with tab_mobile:
     <body>
         <div class="qr-container">
             <div class="qr-box-wrapper">
-                <!-- Εδώ μπαίνει το QR code από την Python -->
                 <img src="data:image/png;base64,{img_str}" alt="QR Code">
-                <!-- Η γραμμή σάρωσης -->
                 <div class="scanner-laser"></div>
             </div>
             
@@ -3573,7 +3587,7 @@ with tab_info:
             f"""<div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; padding: 25px; height: 100%; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08); animation: cardFadeIn 0.5s ease-out;">
 <h3 style="color: #4A3D73; font-size: 1.2rem; margin-top: 0; display: flex; align-items: center; gap: 8px;">🔒 Απόρρητο Δεδομένων</h3>
 <p style="color: #73658a; line-height: 1.6; font-size: 0.95rem;">
-Το ιστορικό σου αποθηκεύεται <strong>τοπικά</strong> στον υπολογιστή σου (στο αρχείο <code>user_data.csv</code>) και δεν ανεβαίνει σε κάποια εξωτερική βάση δεδομένων. 
+Το ιστορικό σου αποθηκεύεται <strong>με απόλυτη ασφάλεια</strong> στην cloud βάση δεδομένων της εφαρμογής (Supabase), ώστε να μπορείς να συνδέεσαι από παντού χωρίς να χάνεις την πρόοδό σου. 
 Τα δεδομένα που στέλνονται στο API του OpenAI είναι κρυπτογραφημένα και <strong>δεν</strong> χρησιμοποιούνται για την εκπαίδευση μελλοντικών μοντέλων τους.
 </p>
 </div>""", 
