@@ -3339,6 +3339,10 @@ with tab_profile:
                 "soothing_things": soothing_things,
             }
             save_profile(new_profile)
+
+            st.toast(_t("✨ Το προφίλ ενημερώθηκε!", "✨ Profile updated!"), icon="✅")
+
+            st.rerun() 
             
             # Μήνυμα επιτυχίας
             st.markdown(
