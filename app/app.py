@@ -45,7 +45,6 @@ supabase = init_supabase()
 # ΠΡΟΣΩΠΙΚΟ ΠΡΟΦΙΛ ΧΡΗΣΤΗ 
 # ===========================================================
 def _get_user_email():
-    # Βοηθητική συνάρτηση για να βρίσκουμε το email παντού
     email = (st.session_state.get("user_email") or "").strip().lower()
     if not email:
         email = (st.session_state.get("user_name") or "anon").strip().lower()
@@ -53,33 +52,38 @@ def _get_user_email():
 
 def load_profile():
     user_email = _get_user_email()
+    
+    # 1. Ελέγχουμε την προσωρινή μνήμη για να ξεκλειδώνει αμέσως το chat!
+    if "current_profile" in st.session_state:
+        return st.session_state.current_profile
+        
     try:
         response = supabase.table("user_data").select("profile").eq("email", user_email).execute()
         if len(response.data) > 0:
-            return response.data[0].get("profile", {})
+            data = response.data[0].get("profile", {})
+            st.session_state.current_profile = data  # Το σώζουμε τοπικά
+            return data
         else:
-            # Αν δεν υπάρχει, φτιάχνουμε νέα εγγραφή
-            supabase.table("user_data").insert({
-                "email": user_email, 
-                "profile": {}, 
-                "chat_history": {}
-            }).execute()
             return {}
     except Exception as e:
-        print(f"Supabase load profile error: {e}")
+        st.error(f"⚠️ Σφάλμα φόρτωσης (Supabase): {e}")
         return {}
 
 def save_profile(new_profile):
     user_email = _get_user_email()
+    
+    # 2. Αποθηκεύουμε τα δεδομένα κατευθείαν στην προσωρινή μνήμη
+    st.session_state.current_profile = new_profile
+    
     try:
-        # Ενημερώνουμε τη βάση με το νέο προφίλ
         response = supabase.table("user_data").select("email").eq("email", user_email).execute()
         if len(response.data) == 0:
             supabase.table("user_data").insert({"email": user_email, "profile": new_profile, "chat_history": {}}).execute()
         else:
             supabase.table("user_data").update({"profile": new_profile}).eq("email", user_email).execute()
     except Exception as e:
-        print(f"Supabase save profile error: {e}")
+        # Αν η βάση "αρνηθεί" τα δεδομένα, τώρα θα μας πετάξει κόκκινο μήνυμα για να ξέρουμε γιατί!
+        st.error(f"⚠️ Σφάλμα αποθήκευσης (Supabase): {e}")
 
 
 # ============================================================
