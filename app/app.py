@@ -2380,7 +2380,7 @@ with tab_ex:
     st.markdown(
         """
         <div class="page-header">
-          <h1 class='page-title'>🧘 Μικρή Βιβλιοθήκη Ασercises</h1>
+          <h1 class='page-title'>🧘 Μικρή Βιβλιοθήκη Ασκήσεων </h1>
           <p class='page-subtitle'>
             Μικρές ασκήσεις φροντίδας και ήρεμα διαδραστικά κουμπάκια,
             προσαρμοσμένα σε εσένα.
