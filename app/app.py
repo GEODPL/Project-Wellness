@@ -3340,20 +3340,9 @@ with tab_profile:
             }
             save_profile(new_profile)
 
-            st.toast(_t("✨ Το προφίλ ενημερώθηκε!", "✨ Profile updated!"), icon="✅")
+            st.toast("✨ Το προφίλ ενημερώθηκε!", icon="✅")
 
             st.rerun() 
-            
-            # Μήνυμα επιτυχίας
-            st.markdown(
-                """
-                <div style="background: #baf7c3; color: #158047; padding: 15px; border-radius: 12px; 
-                            text-align: center; font-weight: 600; margin-top: 15px; border: 1px solid #99deb0;
-                            box-shadow: 0 4px 15px rgba(21, 128, 71, 0.15); animation: cardFadeIn 0.5s;">
-                    ✨ Το προφίλ σου ενημερώθηκε!
-                </div>
-                """, unsafe_allow_html=True
-            )
             
     st.markdown("</div>", unsafe_allow_html=True)
 
