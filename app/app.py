@@ -294,39 +294,78 @@ def blend_mode_instructions(weights: Dict[str, float]) -> str:
     return f"Dynamic mode blending (top): {wtxt}. " + " ".join(chunks)
 
 
-def build_dialogue_llm_user_prompt(latest_user_text: str, profile: Dict[str, Any], weights: Dict[str, float], phase: str) -> str:
-    """
-    Narrative continuity prompt:
-    - Inject compact context
-    - Inject blended instructions
-    - Enforce: no wrap-up bundles unless phase==closing
-    - Anti-repeat: avoid last bot outputs
-    """
-    ctx = build_compact_context(max_pairs=10)
-    blended = blend_mode_instructions(weights)
-    avoid = get_last_bot_outputs(6)
+def build_llm_user_prompt(
+            raw_user_text: str, mood_value: int, sleep: int, water: int,
+            active_mode: Optional[str], mode_weights: dict,
+        ) -> str:
+            ctx = build_compact_context(max_pairs=10)
+            summary = (st.session_state.conversation_summary or "").strip()
+            threads = st.session_state.open_threads or []
+            facts = st.session_state.facts_memory or []
 
-    avoid_block = "\n".join([f"- {a}" for a in avoid]) if avoid else "- (κανένα)"
+            profile_snip_parts = []
+            for k in ["context", "main_goals", "main_struggles", "helpful_things", "preferred_tone", "triggers", "soothing_things"]:
+                v = (profile.get(k) or "").strip()
+                if v: profile_snip_parts.append(f"- {k}: {v}")
+            profile_snip = "\n".join(profile_snip_parts).strip()
 
-    rules = (
-        "Στόχος: φυσικός διάλογος με συνοχή.\n"
-        "Κανόνες:\n"
-        "- Μη δίνεις διάγνωση ή ιατρικές οδηγίες.\n"
-        "- Μην εμφανίζεις σύνοψη/χάρτη/άσκηση εκτός αν σου ζητηθεί ρητά ή αν είμαστε σε closing phase.\n"
-        "- Μην επαναλάβεις πρόσφατες φράσεις (δες avoid list).\n"
-        "- Κράτα 1–2 ερωτήσεις μόνο αν είναι απαραίτητο.\n"
-    )
+            mode_instructions = []
+            top2 = sorted(mode_weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
+            for mode_key, w in top2:
+                label = MODES.get(mode_key, {}).get("label", mode_key)
+                mode_instructions.append(f"- {label} (weight={w:.2f})")
+            mode_text = "\n".join(mode_instructions) if mode_instructions else "- None"
 
-    phase_rule = "closing" if phase == "closing" else "dialogue"
-    return (
-        f"{rules}\n"
-        f"Τρέχουσα φάση: {phase_rule}\n"
-        f"{('Blending οδηγίες: ' + blended) if blended else ''}\n\n"
-        f"Πλαίσιο προφίλ (σύντομα): name={profile.get('name','')}, context={profile.get('context','')}, tone={profile.get('preferred_tone','')}\n\n"
-        f"Ιστορικό (compact):\n{ctx}\n\n"
-        f"Avoid επαναλήψεων:\n{avoid_block}\n\n"
-        f"Νέο μήνυμα χρήστη:\n{latest_user_text}"
-    )
+            avoid = st.session_state.last_bot_outputs[-6:] if st.session_state.last_bot_outputs else []
+            lang_directive = _t("- Απάντησε αυστηρά στα Ελληνικά.", "- Respond strictly in English.")
+
+            prompt = f"""
+ΣΥΣΤΗΜΑ ΣΥΝΟΧΗΣ (Narrative Continuity Layer):
+- Διατήρησε συνοχή με βάση το ιστορικό και τη rolling memory.
+- Μην κάνεις διάγνωση, μην δίνεις κλινικές ιατρικές οδηγίες.
+
+CHECK-IN:
+- mood: {mood_value}/10
+- sleep: {sleep}
+- water: {water}
+
+DYNAMIC MODE BLEND (Top-2):
+{mode_text}
+Active mode: {active_mode or "NONE"}
+
+PROFILE SNIPPET:
+{profile_snip if profile_snip else "- (no extra profile context)"}
+
+ROLLING SUMMARY:
+{summary if summary else "- (empty)"}
+
+OPEN THREADS:
+{("- " + "\n- ".join(threads)) if threads else "- (none)"}
+
+FACTS MEMORY:
+{("- " + "\n- ".join(facts)) if facts else "- (none)"}
+
+ΤΕΛΕΥΤΑΙΟ CONTEXT:
+{ctx if ctx else "- (no prior turns)"}
+
+ANTI-REPEAT:
+{("- " + "\n- ".join(avoid)) if avoid else "- (none)"}
+
+ΚΛΙΝΙΚΟ ΣΤΥΛ ΚΑΙ ΨΥΧΟΛΟΓΙΚΗ ΕΜΒΑΘΥΝΣΗ (ΟΔΗΓΙΕΣ):
+{lang_directive}
+- Υιοθέτησε το στυλ ενός έμπειρου ψυχολόγου/συμβούλου ευεξίας με βαθιά ενσυναίσθηση και θεραπευτική παρουσία.
+- Οι απαντήσεις πρέπει να είναι εκτενείς, αναλυτικές και να μην μένουν στην επιφάνεια των πραγμάτων. 
+- Εμβάθυνε στο συναίσθημα και στο πρόβλημα που περιγράφει ο χρήστης. Προσπάθησε να συνδέσεις όσα λέει με το ιστορικό του (Rolling Summary), τις δυσκολίες του (Profile) και τις τρέχουσες μετρήσεις του.
+- Κάνε ουσιαστική συναισθηματική επικύρωση (validation) με ζεστό τρόπο, δείχνοντας ότι κατανοείς το βάρος της κατάστασης, πριν προχωρήσεις σε ερωτήσεις.
+- Χρησιμοποίησε τη Μαιευτική Μέθοδο (Socratic Questioning) για να βοηθήσεις τον χρήστη να αναστοχαστεί και να δει βαθύτερα μοτίβα στη συμπεριφορά ή τις σκέψεις του.
+- Δώσε έκταση και χώρο στο κείμενο για να αναπτυχθεί η σκέψη σου. Αποφέυγε τις σύντομες ή βιαστικές απαντήσεις.
+- Όχι bullets. Η ροή του λόγου πρέπει να είναι συνεχής, φυσική και θεραπευτική.
+- Μην εμφανίσεις reasoning μέσα στο κυρίως μήνυμα.
+
+ΜΗΝΥΜΑ ΧΡΗΣΤΗ:
+{raw_user_text}
+""".strip()
+            return prompt
 
 
 def infer_age_range(age: Any) -> str:
