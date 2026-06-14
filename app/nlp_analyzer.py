@@ -2,12 +2,6 @@ import spacy
 import re
 
 # Φορτώνουμε το μεσαίο (md) ελληνικό μοντέλο
-try:
-    nlp = spacy.load("el_core_news_md")
-except OSError:
-    # Fallback σε περίπτωση που τρέχεις τοπικά και δεν έχει κατέβει
-    import spacy.cli
-    spacy.cli.download("el_core_news_md")
     nlp = spacy.load("el_core_news_md")
 
 def extract_linguistic_features(text: str) -> dict:
