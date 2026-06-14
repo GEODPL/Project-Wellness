@@ -12,6 +12,7 @@ import pandas as pd
 import qrcode
 from data_logger import log_user_data
 from PIL import Image
+from nlp_analyzer import extract_linguistic_features
 
 from llm import llm_therapeutic_reply, llm_exercise_followup
 from rules import (
@@ -297,6 +298,7 @@ def blend_mode_instructions(weights: Dict[str, float]) -> str:
 def build_llm_user_prompt(
             raw_user_text: str, mood_value: int, sleep: int, water: int,
             active_mode: Optional[str], mode_weights: dict,
+            nlp_metrics: dict
         ) -> str:
             ctx = build_compact_context(max_pairs=10)
             summary = (st.session_state.conversation_summary or "").strip()
@@ -350,6 +352,13 @@ FACTS MEMORY:
 
 ANTI-REPEAT:
 {("- " + "\n- ".join(avoid)) if avoid else "- (none)"}
+
+ΓΛΩΣΣΟΛΟΓΙΚΑ ΜΕΤΑ-ΔΕΔΟΜΕΝΑ (NLP Metrics):
+- Αριθμός λέξεων: {nlp_metrics.get('word_count', 0)}
+- Απόλυτες λέξεις (γνωστική διαστρέβλωση): {nlp_metrics.get('absolutes_count', 0)}
+- Αρνητικά μόρια: {nlp_metrics.get('negations_count', 0)}
+- Λεκτικό επείγοντος: {'ΝΑΙ' if nlp_metrics.get('has_urgency', False) else 'ΟΧΙ'}
+*Οδηγία: Αν οι απόλυτες λέξεις είναι πολλές (>2), προσπάθησε μέσω της Μαιευτικής να δώσεις μια πιο ισορροπημένη οπτική στο πρόβλημα.*
 
 ΚΛΙΝΙΚΟ ΣΤΥΛ ΚΑΙ ΨΥΧΟΛΟΓΙΚΗ ΕΜΒΑΘΥΝΣΗ (ΟΔΗΓΙΕΣ):
 {lang_directive}
@@ -1719,6 +1728,9 @@ ANTI-REPEAT:
                         decision_trace.append("Open: gentle mismatch note (ok + strained).")
 
                 # 6) LLM dialogue reply 
+                # ΝΕΟ: Εξαγωγή Γλωσσολογικών Χαρακτηριστικών πριν το prompt!
+                nlp_metrics = extract_linguistic_features(text)
+
                 prompt = build_llm_user_prompt(
                     raw_user_text=text,
                     mood_value=mood_value,
@@ -1726,6 +1738,7 @@ ANTI-REPEAT:
                     water=water,
                     active_mode=active_mode,
                     mode_weights=mode_weights,
+                    nlp_metrics=nlp_metrics,
                 )
 
                 llm_out = llm_therapeutic_reply(
