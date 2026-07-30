@@ -1,24 +1,45 @@
 /* =========================================================
-   GLOBAL THEME (SOFT LILAC)
+   GLOBAL THEME — "Η ΩΡΑ ΤΟΥ ΛΥΚΟΦΩΤΟΣ" (Twilight Hour)
+   Η στιγμή ανάμεσα σε μέρα και νύχτα -- ο ουρανός στη στιγμή
+   της παύσης, του αναστοχασμού. Κάθε χρώμα έχει ρόλο:
+   lilac = σηματοδότηση/ταυτότητα, rose = ζεστασιά, ember = ενέργεια,
+   sage = γείωση/ηρεμία, deep = κείμενο.
    ========================================================= */
 
+@import url('https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,500;7..72,600;7..72,700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 :root {
-  --bg-gradient-start: #f6f3ff;
-  --bg-gradient-end:   #fdfcff;
-  --card-bg:           rgba(255, 255, 255, 0.45); 
-  --card-soft-bg:      rgba(255, 255, 255, 0.35);
-  --accent:            #d4befa;
-  --accent-soft:       rgba(212, 190, 250, 0.2);
-  --accent-strong:     #b79df2;
-  --text-main:         #3b304c;
-  --text-soft:         #73658a;
-  --border-subtle:     rgba(255, 255, 255, 0.6); 
-  --shadow-soft:       0 12px 40px rgba(108, 90, 158, 0.08); 
+  /* --- Twilight palette (νέα, ονομασμένη παλέτα) --- */
+  --twilight-deep:    #2E2440;   /* κύριο κείμενο -- ζεστό ink-plum, όχι σκέτο μαύρο */
+  --twilight-lilac:   #B79DF2;   /* signature χρώμα -- ταυτότητα/accent */
+  --twilight-lilac-soft: #D4BEFA;
+  --twilight-rose:    #F2A6B8;   /* ζεστασιά -- υψηλή διάθεση, θετικά states */
+  --twilight-ember:   #E8916B;   /* ενέργεια -- streaks, κύρια CTA */
+  --twilight-sky:     #EFEAFB;   /* φόντο -- απαλό λιλά-λευκό */
+  --twilight-sage:    #8FAF8C;   /* γείωση -- αναπνοή, νερό, ηρεμία */
+
+  /* --- Παλιά ονόματα, χαρτογραφημένα στη νέα παλέτα (ώστε να μη σπάσει τίποτα) --- */
+  --bg-gradient-start: #F7F2FF;
+  --bg-gradient-end:   #FDFBFF;
+  --card-bg:           rgba(255, 255, 255, 0.48);
+  --card-soft-bg:      rgba(255, 255, 255, 0.36);
+  --accent:            var(--twilight-lilac-soft);
+  --accent-soft:       rgba(183, 157, 242, 0.20);
+  --accent-strong:     var(--twilight-lilac);
+  --text-main:         var(--twilight-deep);
+  --text-soft:         #6B5C82;
+  --border-subtle:     rgba(255, 255, 255, 0.6);
+  --shadow-soft:       0 12px 40px rgba(46, 36, 64, 0.09);
   --radius-xl:         22px;
   --radius-pill:       999px;
   --transition-fast:   160ms ease-out;
   --transition-med:    220ms ease-out;
   --input-bg:          rgba(245, 247, 251, 0.6);
+
+  /* --- Τυπογραφία --- */
+  --font-display: "Literata", Georgia, serif;
+  --font-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
 /* =========================================================
@@ -28,35 +49,32 @@
 html, body {
   margin: 0;
   padding: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Segoe UI", sans-serif;
+  font-family: var(--font-body);
   color: var(--text-main);
 }
 
-/* Ζωντανό λιλά φόντο που "αναπνέει" */
+/* Ο ουρανός του λυκόφωτος -- ζεστό ροζ-λιλά που "αναπνέει" απαλά */
 .stApp {
-  background: linear-gradient(-45deg, #f3ecff, #fbfaff, #eee3ff, #f6f0ff);
+  background: linear-gradient(-45deg, #F4ECFF, #FBF5FA, #EFE3FF, #F7ECEF);
   background-size: 400% 400%;
-  animation: backgroundBreathe 18s ease-in-out infinite;
+  animation: backgroundBreathe 20s ease-in-out infinite;
 }
 
-/* Κεντρικό container λίγο πιο στενό για ηρεμία */
 .block-container {
   padding-top: 1.3rem !important;
   max-width: 1150px;
 }
 
-/* Scrollbar πιο διακριτικό */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(108, 90, 158, 0.15);
+  background: rgba(46, 36, 64, 0.15);
   border-radius: 20px;
 }
+
+/* Utility classes -- ασφαλείς προσθήκες, δεν αντικαθιστούν τίποτα */
+.mono { font-family: var(--font-mono); letter-spacing: 0.01em; }
+.font-display { font-family: var(--font-display); }
 
 /* =========================================================
    APP HEADER
@@ -72,15 +90,17 @@ html, body {
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
   border: 1px solid var(--border-subtle);
+  border-top: 2px solid var(--twilight-ember);
   box-shadow: var(--shadow-soft);
   margin-bottom: 1rem;
   animation: headerIn var(--transition-med);
 }
 
 .app-title-left {
-  font-weight: 700;
-  font-size: 1.3rem;
-  letter-spacing: 0.02em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.4rem;
+  letter-spacing: 0.01em;
   color: var(--text-main);
 }
 
@@ -89,6 +109,19 @@ html, body {
   color: var(--text-soft);
   max-width: 360px;
   text-align: right;
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.3rem;
+    padding: 0.9rem 1.1rem 0.9rem;
+  }
+  .app-subtitle-right {
+    max-width: 100%;
+    text-align: left;
+  }
 }
 
 /* =========================================================
@@ -100,10 +133,11 @@ html, body {
 }
 
 .page-title {
-  font-size: 1.55rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  margin-bottom: 0.2rem;
+  font-family: var(--font-display);
+  font-size: 1.65rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  margin-bottom: 0.25rem;
   color: var(--text-main);
 }
 
@@ -115,6 +149,8 @@ html, body {
 
 /* =========================================================
    MAIN WRAPPER & CARDS (GLASSMORPHISM / ΕΦΕ ΓΥΑΛΙΟΥ)
+   Κάθε κάρτα έχει μια λεπτή "ember" γραμμή πάνω -- σαν ετικέτα
+   δελτίου, μια διακριτική αναφορά στο "στίγμα ώρας" του λυκόφωτος.
    ========================================================= */
 
 .main-wrapper,
@@ -130,13 +166,12 @@ html, body {
 .reframe-card,
 .qr-page-wrapper {
   background: var(--card-bg) !important;
-  backdrop-filter: blur(24px) saturate(160%); 
+  backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid var(--border-subtle); 
+  border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-soft);
   transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s ease;
 }
-
 
 .main-wrapper { margin-top: 0.6rem; padding: 1.2rem 1.4rem 1.4rem; border-radius: 26px; animation: cardFadeIn var(--transition-med); }
 .chat-card { border-radius: 26px; padding: 1.4rem 1.2rem 1.4rem; }
@@ -157,11 +192,11 @@ html, body {
 .emergency-block:hover,
 .qr-side-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 22px 55px rgba(108, 90, 158, 0.15); /* Ελαφρώς πιο έντονη λιλά σκιά */
+  box-shadow: 0 22px 55px rgba(46, 36, 64, 0.16);
 }
 
 /* =========================================================
-   TABS – Ζωντανά μενού 
+   TABS
    ========================================================= */
 
 .stTabs [role="tablist"] {
@@ -172,15 +207,28 @@ html, body {
   padding: 0.3rem;
   border-radius: var(--radius-pill);
   gap: 0.4rem;
+  /* --- Mobile: οριζόντιο scroll αντί για άβολο wrap σε πολλές γραμμές --- */
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none; /* Firefox: κρυφή scrollbar, το scroll δουλεύει κανονικά */
 }
+.stTabs [role="tablist"]::-webkit-scrollbar { display: none; } /* Chrome/Safari */
 
 .stTabs [role="tab"] {
   padding: 0.38rem 0.95rem;
   border-radius: var(--radius-pill);
   border: none;
+  font-family: var(--font-body);
+  font-weight: 600;
   font-size: 0.9rem;
   color: var(--text-soft);
   background: transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
+  scroll-snap-align: start;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
@@ -192,14 +240,32 @@ html, body {
 }
 
 .stTabs [aria-selected="true"] {
-  background: linear-gradient(120deg, #e4d4ff, #f2eaff);
-  color: #3b304c;
+  background: linear-gradient(120deg, var(--twilight-lilac-soft), #F2EAFF);
+  color: var(--twilight-deep);
   box-shadow: 0 10px 24px rgba(183, 157, 242, 0.3);
   transform: translateY(-2px);
 }
 
-/* Κρύβουμε underline του Streamlit */
 .stTabs [role="tab"]::before { content: none !important; }
+
+/* --- Mobile: μεγαλύτεροι στόχοι αφής + οπτικό υπαινιγμό ότι υπάρχουν
+   κι άλλα tabs εκτός οθόνης (fade στις άκρες, μέσω mask-image) --- */
+@media (max-width: 640px) {
+  .stTabs [role="tablist"] {
+    padding: 0.35rem;
+    -webkit-mask-image: linear-gradient(
+      to right, transparent 0, black 18px, black calc(100% - 18px), transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right, transparent 0, black 18px, black calc(100% - 18px), transparent 100%
+    );
+  }
+  .stTabs [role="tab"] {
+    padding: 0.5rem 0.9rem;
+    font-size: 0.86rem;
+  }
+}
+
 
 /* =========================================================
    CHAT ROWS & BUBBLES
@@ -214,53 +280,49 @@ html, body {
   padding: 0.75rem 0.95rem;
   border-radius: 20px;
   font-size: 0.95rem;
-  line-height: 1.5;
-  box-shadow: 0 8px 18px rgba(108, 90, 158, 0.08);
+  line-height: 1.55;
+  box-shadow: 0 8px 18px rgba(46, 36, 64, 0.08);
   animation: bubbleIn var(--transition-med);
 }
 
 .chat-bubble-user, .chat-user {
-  background: linear-gradient(135deg, #e4d4ff, #f2eaff);
-  color: #3b304c;
+  background: linear-gradient(135deg, var(--twilight-lilac-soft), #F2EAFF);
+  color: var(--twilight-deep);
   border-bottom-right-radius: 6px;
-  box-shadow: 0 10px 22px rgba(183, 157, 242, 0.2);
+  box-shadow: 0 10px 22px rgba(183, 157, 242, 0.22);
 }
 
 .chat-bubble-bot, .chat-bot {
-  background: rgba(219, 203, 203, 0.85); /* Ημιδιάφανο λευκό */
+  background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(10px);
   color: var(--text-main);
   border-bottom-left-radius: 6px;
-  box-shadow: 0 10px 22px rgba(108, 90, 158, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 10px 22px rgba(46, 36, 64, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.85);
 }
 
-/* Μικρή άσκηση bubble */
 .exercise-bubble {
   max-width: 80%;
   padding: 0.9rem 1rem;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(10px);
-  border-left: 4px solid var(--accent-strong);
-  box-shadow: 0 10px 24px rgba(108, 90, 158, 0.1);
+  border-left: 4px solid var(--twilight-sage);
+  box-shadow: 0 10px 24px rgba(46, 36, 64, 0.1);
   animation: bubbleIn var(--transition-med);
 }
 
-.exercise-title { font-weight: 600; margin-bottom: 0.35rem; }
+.exercise-title { font-family: var(--font-display); font-weight: 600; margin-bottom: 0.35rem; }
 .exercise-body { font-size: 0.94rem; color: var(--text-soft); }
 
-/* Emergency */
 .emergency-block {
   border-left: 4px solid #ff4d5a;
   background: linear-gradient(120deg, rgba(255, 77, 90, 0.1), rgba(255, 255, 255, 0.6)) !important;
 }
 
-/* Plan card */
-.plan-title { font-weight: 600; margin-bottom: 0.35rem; }
+.plan-title { font-family: var(--font-display); font-weight: 600; margin-bottom: 0.35rem; }
 .plan-body { font-size: 0.94rem; color: var(--text-soft); }
 
-/* Συναισθηματικός χάρτης */
 .emotional-map-card {
   margin: 0.6rem 0;
   padding: 0.9rem 1rem;
@@ -268,7 +330,7 @@ html, body {
   background: var(--card-bg);
   backdrop-filter: blur(15px);
   border: 1px solid var(--border-subtle);
-  box-shadow: 0 12px 26px rgba(108, 90, 158, 0.08);
+  box-shadow: 0 12px 26px rgba(46, 36, 64, 0.08);
   animation: bubbleIn var(--transition-med);
 }
 
@@ -285,7 +347,7 @@ html, body {
   background: var(--card-bg);
   backdrop-filter: blur(12px);
   margin: 0.8rem 0 0.9rem;
-  box-shadow: 0 12px 30px rgba(108, 90, 158, 0.08);
+  box-shadow: 0 12px 30px rgba(46, 36, 64, 0.08);
   border: 1px solid var(--border-subtle);
 }
 
@@ -297,10 +359,10 @@ html, body {
   animation: softPulse 4s ease-in-out infinite;
 }
 
-.avatar-red   { background: radial-gradient(circle, #ff8c9a, #ff5b6a); }
-.avatar-yellow{ background: radial-gradient(circle, #ffd08a, #ffb347); }
-.avatar-lilac { background: radial-gradient(circle, #e4d4ff, #b79df2); } /* Απαλό λιλά avatar */
-.avatar-green { background: radial-gradient(circle, #baf7c3, #62c48b); }
+.avatar-red    { background: radial-gradient(circle, #ff8c9a, #ff5b6a); }
+.avatar-yellow { background: radial-gradient(circle, #ffd08a, #ffb347); }
+.avatar-lilac  { background: radial-gradient(circle, var(--twilight-lilac-soft), var(--twilight-lilac)); }
+.avatar-green  { background: radial-gradient(circle, #baf7c3, var(--twilight-sage)); }
 
 .wellness-avatar-text-main { font-weight: 600; font-size: 0.98rem; margin-bottom: 0.1rem; }
 .wellness-avatar-text-sub { font-size: 0.88rem; color: var(--text-soft); }
@@ -308,37 +370,37 @@ html, body {
 .checkin-circles { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 10px 0 14px 0; }
 .checkin-pill {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 18px;
-  background: rgba(212, 190, 250, 0.15); border: 1px solid rgba(212, 190, 250, 0.35);
+  background: rgba(183, 157, 242, 0.13); border: 1px solid rgba(183, 157, 242, 0.32);
 }
 .checkin-circle {
   width: 52px; height: 52px; border-radius: 999px; display: grid; place-items: center;
-  background: #e4d4ff; box-shadow: 0 8px 18px rgba(183, 157, 242, 0.2); border: 1px solid rgba(255, 255, 255, 0.55);
+  background: var(--twilight-lilac-soft); box-shadow: 0 8px 18px rgba(183, 157, 242, 0.2); border: 1px solid rgba(255, 255, 255, 0.55);
 }
-.checkin-circle .pct { font-weight: 800; font-size: 0.95rem; color: #4A3D73; line-height: 1; }
+.checkin-circle .pct { font-family: var(--font-mono); font-weight: 700; font-size: 0.92rem; color: var(--twilight-deep); line-height: 1; }
 .checkin-meta { display: flex; flex-direction: column; gap: 2px; }
-.checkin-meta .label { font-weight: 800; color: #4A3D73; font-size: 0.92rem; line-height: 1.1; }
-.checkin-meta .sub { color: #6C5A9E; font-size: 0.84rem; line-height: 1.15; opacity: 0.95; }
+.checkin-meta .label { font-weight: 800; color: var(--twilight-deep); font-size: 0.92rem; line-height: 1.1; }
+.checkin-meta .sub { color: var(--text-soft); font-size: 0.84rem; line-height: 1.15; opacity: 0.95; }
 
 /* =========================================================
    HISTORY & REFRAME TEXTS
    ========================================================= */
 
 .history-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; }
-.history-date { font-size: 0.86rem; color: var(--text-soft); }
+.history-date { font-family: var(--font-mono); font-size: 0.84rem; color: var(--text-soft); }
 .history-mood-pill { padding: 0.12rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; }
 .mood-low { background: rgba(255, 113, 128, 0.12); color: #c12530; }
-.mood-mid { background: rgba(255, 199, 121, 0.16); color: #a2651b; }
-.mood-high { background: rgba(149, 234, 187, 0.16); color: #158047; }
+.mood-mid { background: rgba(232, 145, 107, 0.16); color: #a25a26; }
+.mood-high { background: rgba(143, 175, 140, 0.18); color: #3f6b3c; }
 .mood-neutral { background: rgba(140, 140, 160, 0.12); color: #55556b; }
 .history-meta-row { display: flex; gap: 0.4rem; margin-bottom: 0.35rem; }
 .history-chip { font-size: 0.8rem; padding: 0.12rem 0.5rem; border-radius: 999px; background: rgba(245, 244, 255, 0.6); color: #5e567b; }
 .history-message { font-size: 0.9rem; color: var(--text-main); }
 
-.reframe-original-title, .reframe-new-title { font-size: 0.86rem; font-weight: 600; margin-bottom: 0.2rem; }
+.reframe-original-title, .reframe-new-title { font-family: var(--font-display); font-size: 0.92rem; font-weight: 600; margin-bottom: 0.25rem; }
 .reframe-original-body, .reframe-new-body { font-size: 0.9rem; color: var(--text-main); margin-bottom: 0.5rem; }
 
 /* =========================================================
-   INPUTS, TEXTAREAS, SLIDERS (Εναρμονισμένα με το Γυαλί)
+   INPUTS, TEXTAREAS, SLIDERS
    ========================================================= */
 
 input[type="text"],
@@ -351,6 +413,7 @@ textarea,
   background: var(--input-bg) !important;
   backdrop-filter: blur(5px);
   padding: 0.55rem 0.7rem !important;
+  font-family: var(--font-body) !important;
   font-size: 0.93rem !important;
   transition: box-shadow 140ms ease-out, border-color 140ms ease-out,
               background 140ms ease-out, transform 140ms ease-out;
@@ -361,13 +424,12 @@ input[type="number"]:focus,
 textarea:focus,
 .stTextInput input:focus,
 .stTextArea textarea:focus {
-  border-color: var(--accent-strong) !important;
+  border-color: var(--twilight-lilac) !important;
   box-shadow: 0 0 0 2px var(--accent-soft);
   background: rgba(255, 255, 255, 0.9) !important;
   transform: translateY(-1px);
 }
 
-/* SLIDERS */
 [data-baseweb="slider"] { padding: 0.3rem 0 0.1rem; }
 [data-baseweb="slider"] > div {
   background: rgba(248, 247, 247, 0.6) !important;
@@ -380,7 +442,7 @@ textarea:focus,
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--accent-strong) !important;
+  background: var(--twilight-lilac) !important;
   box-shadow: 0 0 0 4px var(--accent-soft) !important;
   border: none;
 }
@@ -388,50 +450,59 @@ textarea:focus,
 
 /* =========================================================
    BUTTONS
+   Πρωτεύον CTA: ζεστή μετάβαση lilac -> ember (σαν το φως του
+   λυκόφωτος να αλλάζει χρώμα) -- το πιο "τολμηρό" στοιχείο.
    ========================================================= */
 
 .stButton > button {
   border-radius: 999px;
   border: none;
-  background: linear-gradient(120deg, #e4d4ff, #f2eaff);
-  color: #3b304c;
-  padding: 0.4rem 1.05rem;
+  background: linear-gradient(120deg, var(--twilight-lilac-soft) 0%, var(--twilight-lilac) 55%, var(--twilight-ember) 130%);
+  color: #FFFFFF;
+  padding: 0.42rem 1.1rem;
+  font-family: var(--font-body);
   font-size: 0.9rem;
-  font-weight: 600;
-  box-shadow: 0 10px 24px rgba(183, 157, 242, 0.3);
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(183, 157, 242, 0.32);
   transition: transform 160ms ease-out, box-shadow 160ms ease-out, filter 160ms ease-out;
   transform-origin: center;
 }
 
 .stButton > button:hover {
   transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 14px 30px rgba(183, 157, 242, 0.4);
-  filter: brightness(1.03);
+  box-shadow: 0 14px 30px rgba(183, 157, 242, 0.42);
+  filter: brightness(1.04);
 }
 
 .stButton > button:active {
   transform: translateY(0) scale(0.99);
-  box-shadow: 0 6px 16px rgba(183, 157, 242, 0.25);
+  box-shadow: 0 6px 16px rgba(183, 157, 242, 0.26);
+}
+
+.stButton > button:focus-visible {
+  outline: 2px solid var(--twilight-deep);
+  outline-offset: 2px;
 }
 
 /* =========================================================
    STATS SUMMARY CARDS & CHARTS
+   Χρωματισμός με νόημα: mood=rose (ζεστασιά), sleep=lilac
+   (ταυτότητα/ξεκούραση), water=sage (γείωση/φυσικό στοιχείο)
    ========================================================= */
 
-.stat-label { font-size: 0.8rem; font-weight: 600; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.06em; }
-.stat-value { font-size: 1.4rem; font-weight: 700; color: var(--text-main); }
+.stat-label { font-size: 0.8rem; font-weight: 700; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.06em; }
+.stat-value { font-family: var(--font-mono); font-size: 1.4rem; font-weight: 700; color: var(--text-main); }
 .stat-foot { font-size: 0.8rem; color: var(--text-soft); }
 .stat-extra-line { margin-top: 0.2rem; margin-bottom: 0.8rem; font-size: 0.85rem; color: var(--text-soft); }
-.chart-title { font-size: 0.9rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.4rem; }
+.chart-title { font-family: var(--font-display); font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.4rem; }
 
-.stats-card-label { font-size: 0.86rem; font-weight: 600; color: var(--text-soft); }
-.stats-card-main { font-size: 1.4rem; font-weight: 700; color: var(--text-main); }
+.stats-card-label { font-size: 0.86rem; font-weight: 700; color: var(--text-soft); }
+.stats-card-main { font-family: var(--font-mono); font-size: 1.4rem; font-weight: 700; color: var(--text-main); }
 .stats-card-sub { font-size: 0.82rem; color: var(--text-soft); }
 
-
-.stats-card-mood { background: linear-gradient(135deg, rgba(228, 212, 255, 0.5), rgba(242, 234, 255, 0.7)) !important; }
-.stats-card-sleep { background: linear-gradient(135deg, rgba(212, 190, 250, 0.3), rgba(183, 157, 242, 0.5)) !important; }
-.stats-card-water { background: linear-gradient(135deg, rgba(186, 247, 195, 0.3), rgba(153, 222, 178, 0.5)) !important; }
+.stats-card-mood  { background: linear-gradient(135deg, rgba(242, 166, 184, 0.28), rgba(242, 166, 184, 0.12)) !important; }
+.stats-card-sleep { background: linear-gradient(135deg, rgba(183, 157, 242, 0.28), rgba(183, 157, 242, 0.12)) !important; }
+.stats-card-water { background: linear-gradient(135deg, rgba(143, 175, 140, 0.28), rgba(143, 175, 140, 0.12)) !important; }
 
 /* =========================================================
    QR CARDS
@@ -439,51 +510,56 @@ textarea:focus,
 
 .qr-card-inner img, .qr-inner-card img {
   max-width: 160px; margin: 0 auto; display: block; border-radius: 20px;
-  background: rgba(255, 255, 255, 0.8); padding: 0.6rem; box-shadow: 0 10px 24px rgba(108, 90, 158, 0.15);
+  background: rgba(255, 255, 255, 0.8); padding: 0.6rem; box-shadow: 0 10px 24px rgba(46, 36, 64, 0.15);
 }
-.qr-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 0.25rem; color: var(--text-main); }
+.qr-title { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; margin-bottom: 0.25rem; color: var(--text-main); }
 .qr-subtitle { font-size: 0.88rem; color: var(--text-soft); margin-bottom: 0.8rem; }
 .qr-url-chip {
   display: inline-block; margin-top: 0.6rem; padding: 0.32rem 1rem; border-radius: var(--radius-pill);
-  font-size: 0.8rem; background: var(--accent-soft); color: var(--accent-strong); border: 1px dashed rgba(183, 157, 242, 0.7);
+  font-family: var(--font-mono); font-size: 0.8rem; background: var(--accent-soft); color: var(--twilight-lilac); border: 1px dashed rgba(183, 157, 242, 0.7);
 }
 .qr-note { font-size: 0.78rem; color: var(--text-soft); margin-top: 0.35rem; }
 .qr-badge {
   display: inline-block; padding: 0.18rem 0.7rem; border-radius: var(--radius-pill); font-size: 0.74rem;
   text-transform: uppercase; letter-spacing: 0.08em; background: rgba(255, 255, 255, 0.8);
-  color: var(--accent-strong); margin-bottom: 0.45rem; box-shadow: 0 6px 14px rgba(0, 0, 0, 0.06);
+  color: var(--twilight-lilac); margin-bottom: 0.45rem; box-shadow: 0 6px 14px rgba(0, 0, 0, 0.06);
 }
-.qr-side-title { font-size: 0.98rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--text-main); }
+.qr-side-title { font-family: var(--font-display); font-size: 0.98rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--text-main); }
 .qr-steps { padding-left: 1.2rem; margin: 0.1rem 0 0.5rem; font-size: 0.88rem; color: var(--text-main); }
 .qr-steps li { margin-bottom: 0.24rem; }
 .qr-side-note { font-size: 0.82rem; color: var(--text-soft); margin-top: 0.4rem; }
 
 .qr-main-card {
   border-radius: 28px; padding: 1.1rem 1.2rem 1.25rem;
-  background: linear-gradient(135deg, rgba(228, 212, 255, 0.4), rgba(242, 234, 255, 0.6)) !important;
+  background: linear-gradient(135deg, rgba(183, 157, 242, 0.22), rgba(242, 234, 255, 0.5)) !important;
   text-align: center;
 }
-.qr-main-card:hover { transform: translateY(-3px); box-shadow: 0 20px 40px rgba(108, 90, 158, 0.15); }
+.qr-main-card:hover { transform: translateY(-3px); box-shadow: 0 20px 40px rgba(46, 36, 64, 0.15); }
 
 /* =========================================================
-   TEXT COLOR OVERRIDES (
+   TEXT COLOR OVERRIDES
    ========================================================= */
 
-textarea, .stChatInput textarea { color: #301934 !important; font-weight: 500; }
-textarea::placeholder, input::placeholder { color: #888888 !important; opacity: 0.7; }
-.stApp, .stApp p, .stApp span, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp div, .stMarkdown {
-  color: #2D2D2D !important;
+textarea, .stChatInput textarea { color: var(--twilight-deep) !important; font-weight: 500; font-family: var(--font-body) !important; }
+textarea::placeholder, input::placeholder { color: #8B7FA0 !important; opacity: 0.75; }
+.stApp, .stApp p, .stApp span, .stApp label, .stApp div, .stMarkdown {
+  color: var(--twilight-deep) !important;
+  font-family: var(--font-body);
+}
+.stApp h1, .stApp h2, .stApp h3, .stApp h4 {
+  color: var(--twilight-deep) !important;
+  font-family: var(--font-display);
 }
 .stTextInput input, .stTextArea textarea {
-  color: #4A3D73 !important;
-  background-color: rgba(255, 255, 255, 0.7) !important; 
+  color: var(--twilight-deep) !important;
+  background-color: rgba(255, 255, 255, 0.7) !important;
   backdrop-filter: blur(5px);
-  -webkit-text-fill-color: #4A3D73 !important;
+  -webkit-text-fill-color: var(--twilight-deep) !important;
 }
 .footer-disclaimer { margin-top: 1.1rem; font-size: 0.78rem; color: var(--text-soft); }
 
 /* =========================================================
-  anm
+   ANIMATIONS
    ========================================================= */
 
 @keyframes backgroundBreathe {
@@ -512,7 +588,6 @@ textarea::placeholder, input::placeholder { color: #888888 !important; opacity: 
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Respect prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.001ms !important;

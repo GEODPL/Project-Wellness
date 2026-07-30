@@ -14,3 +14,24 @@ user_profile.json
 __pycache__/
 .streamlit/
 .env
+
+# --- Streamlit Secrets & Credentials ---
+.streamlit/
+.streamlit/secrets.toml
+google_oauth_credentials.json
+*.env
+*.key
+*.json
+
+# --- Τοπικά δεδομένα, CSV & PDF ---
+*.csv
+user_data.csv
+*.pdf
+
+# --- Python / Caches / Virtual Environments ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.DS_Store

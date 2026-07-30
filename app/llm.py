@@ -208,90 +208,169 @@ def llm_exercise_followup(
 # =========================================================
 # A) NARRATIVE CONTINUITY: UPDATE MEMORY
 # =========================================================
-def llm_update_memory(
-    profile: Dict[str, Any],
-    active_mode: str,
-    mode_weights: Dict[str, float],
-    prev_summary: str,
-    prev_threads: List[str],
-    prev_facts: List[str],
+# =========================================================
+# ΣΥΝΔΥΑΣΜΕΝΗ ΚΛΗΣΗ: REPLY + MEMORY UPDATE ΣΕ 1 API CALL
+# =========================================================
+def llm_therapeutic_reply_with_memory(
+    mood: int,
+    sleep: int,
+    water: int,
     user_text: str,
-    bot_text: str,
+    profile: Dict[str, Any],
+    active_mode: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
+    """
+    Κάνει σε ΜΙΑ κλήση OpenAI ό,τι πριν γινόταν σε 2 ξεχωριστές
+    (llm_therapeutic_reply + llm_update_memory) -- μισό κόστος και μισό
+    latency ανά κανονικό μήνυμα του χρήστη, χωρίς αλλαγή συμπεριφοράς.
+
+    Το `user_text` περιμένεται να είναι το ήδη-χτισμένο, εμπλουτισμένο
+    prompt (από το build_llm_user_prompt), που ήδη περιέχει μέσα του την
+    προηγούμενη rolling summary / open threads / facts memory -- γι' αυτό
+    δεν χρειάζεται να τα περάσουμε ξανά ως ξεχωριστές παραμέτρους εδώ.
+
+    Επιστρέφει dict {"reply", "summary", "threads", "facts"} ή None αν
+    κάτι αποτύχει (τότε ο καλών κάνει fallback στο απλό, rule-based reply).
+    """
+    client = _get_client()
+    if client is None:
+        return None
+
+    base_prompt = _build_system_prompt(
+        mood=mood, sleep=sleep, water=water, profile=profile, active_mode=active_mode
+    )
+
+    memory_instructions = (
+        "\n\nΕΠΙΠΛΕΟΝ ΔΟΥΛΕΙΑ -- ΕΝΗΜΕΡΩΣΗ ΜΝΗΜΗΣ ΣΥΖΗΤΗΣΗΣ:\n"
+        "Μέσα στο μήνυμα του χρήστη θα βρεις την ΠΡΟΗΓΟΥΜΕΝΗ rolling summary, "
+        "open threads, και facts memory (κάτω από τις αντίστοιχες επικεφαλίδες). "
+        "Μαζί με την κυρίως απάντησή σου, επίστρεψε και μια ΕΝΗΜΕΡΩΜΕΝΗ εκδοχή τους:\n"
+        "- summary: 3-6 προτάσεις, ουδέτερο/ήπιο ύφος (ενημέρωσε την προηγούμενη, μη γράψεις από την αρχή)\n"
+        "- threads: 2-6 εκκρεμή θέματα/στόχοι/ερωτήματα, ως λίστα strings\n"
+        "- facts: 0-6 σταθερά, αξιόπιστα facts, ως λίστα strings\n"
+        "Μην βάζεις ευαίσθητες κλινικές δηλώσεις ή λεπτομέρειες αυτοτραυματισμού/βίας στη μνήμη.\n\n"
+        "ΜΟΡΦΗ ΕΞΟΔΟΥ -- ΚΡΙΣΙΜΟ: Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα έγκυρο JSON object "
+        "(χωρίς markdown code fences, χωρίς κείμενο πριν/μετά), με ΑΚΡΙΒΩΣ αυτά τα keys:\n"
+        '{"reply": "<η κύρια απάντηση προς τον χρήστη, στα ελληνικά, ακολουθώντας όλους τους παραπάνω κανόνες>", '
+        '"summary": "<ενημερωμένη σύνοψη>", "threads": ["..."], "facts": ["..."]}'
+    )
+
+    system_prompt = base_prompt + memory_instructions
+
+    try:
+        response = client.chat.completions.create(
+            model=DEFAULT_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text},
+            ],
+            temperature=0.65,
+            response_format={"type": "json_object"},
+        )
+        raw = (response.choices[0].message.content or "").strip()
+        if not raw:
+            return None
+
+        data = json.loads(raw)
+
+        reply = str(data.get("reply", "")).strip()
+        if not reply:
+            return None
+
+        summary = _safe_trim(str(data.get("summary", "")).strip(), 900)
+        threads = data.get("threads", [])
+        facts = data.get("facts", [])
+        if not isinstance(threads, list):
+            threads = []
+        if not isinstance(facts, list):
+            facts = []
+        threads = [str(x).strip() for x in threads if str(x).strip()][:8]
+        facts = [str(x).strip() for x in facts if str(x).strip()][:8]
+
+        return {"reply": reply, "summary": summary, "threads": threads, "facts": facts}
+    except Exception:
+        return None
+
+
+# =========================================================
+# B) THOUGHT REFRAME (RAG-based)
+# =========================================================
+def llm_reframe_reply(
+    thought: str,
+    pattern: str,
+    intensity: int,
+    profile: Dict[str, Any],
+    techniques: List[Dict[str, Any]],
+    personal_history: List[Dict[str, Any]],
+) -> Optional[str]:
+    """
+    Παράγει ένα εξατομικευμένο reframe, βασισμένο σε:
+    - τη σκέψη + το μοτίβο που επέλεξε ο χρήστης
+    - τεχνικές που ανακτήθηκαν (RAG) από την κοινή βιβλιοθήκη γνώσης
+    - τυχόν παρόμοιες προηγούμενες σκέψεις/reframes του ΙΔΙΟΥ χρήστη
+
+    Αν δεν υπάρχει διαθέσιμο LLM key, επιστρέφει None (το reframe.py κάνει
+    τότε fallback στο απλό rule-based reframe, ώστε ο χρήστης να παίρνει
+    πάντα κάποια απάντηση).
+    """
     client = _get_client()
     if client is None:
         return None
 
     prof = _format_profile_snippet(profile)
 
-    system_prompt = (
-        "Είσαι μηχανισμός ενημέρωσης μνήμης συνομιλίας (conversation memory updater).\n"
-        "Επιστρέφεις ΜΟΝΟ έγκυρο JSON, χωρίς επιπλέον κείμενο.\n"
-        "Δεν κάνεις διάγνωση, δεν δίνεις συμβουλές. Απλώς συμπυκνώνεις/οργανώνεις.\n"
-        "Στόχοι:\n"
-        "- Rolling summary: 3–6 προτάσεις, ουδέτερο/ήπιο ύφος.\n"
-        "- Open threads: 2–6 bullets ως strings (εκκρεμή θέματα/στόχοι/ερωτήματα).\n"
-        "- Facts: 0–6 σταθερά facts που φαίνονται αξιόπιστα/διαχρονικά.\n"
-        "Κανόνες:\n"
-        "- Μην βάζεις ευαίσθητες ιατρικές/κλινικές δηλώσεις.\n"
-        "- Μην αποθηκεύεις λεπτομέρειες αυτοτραυματισμού/βίας.\n"
-        "- Αν κάτι είναι αβέβαιο, μην το βάζεις στα facts.\n"
+    techniques_text = (
+        "\n".join(f"- {t.get('content', '')}" for t in techniques)
+        if techniques
+        else "- (καμία ιδιαίτερα σχετική τεχνική βρέθηκε — χρησιμοποίησε τη γενική σου γνώση CBT/ACT)"
     )
 
-    weights_top = sorted(mode_weights.items(), key=lambda kv: kv[1], reverse=True)[:3]
-    weights_text = ", ".join([f"{k}:{v:.2f}" for k, v in weights_top]) if weights_top else "none"
+    personal_text = (
+        "\n".join(
+            f"- Παλιότερη σκέψη: «{p.get('thought', '')}» → Reframe που δοκιμάστηκε τότε: «{p.get('reframe', '')}»"
+            for p in personal_history
+        )
+        if personal_history
+        else "- (καμία σχετική προηγούμενη καταγραφή αυτού του χρήστη)"
+    )
+
+    system_prompt = (
+        "Είσαι υποστηρικτικό σύστημα Thought Reframe, βασισμένο σε αρχές CBT/ACT, στα ελληνικά.\n"
+        "Δουλειά σου: να βοηθήσεις τον χρήστη να δει μια δύσκολη σκέψη από μια πιο τρυφερή, "
+        "ρεαλιστική οπτική — ΧΩΡΙΣ να ακυρώσεις ή να υποτιμήσεις το συναίσθημά του.\n\n"
+        "ΚΑΝΟΝΕΣ:\n"
+        "- 3 έως 5 προτάσεις το πολύ.\n"
+        "- Χρησιμοποίησε ΤΟΥΛΑΧΙΣΤΟΝ μία από τις 'ΣΧΕΤΙΚΕΣ ΤΕΧΝΙΚΕΣ' παρακάτω, προσαρμοσμένη "
+        "στη συγκεκριμένη σκέψη του χρήστη — μην την αντιγράψεις αυτολεξεί, ενσωμάτωσέ τη φυσικά.\n"
+        "- Αν υπάρχει σχετικό 'ΠΡΟΣΩΠΙΚΟ ΙΣΤΟΡΙΚΟ', μπορείς να αναφερθείς διακριτικά σε αυτό "
+        "(π.χ. 'όπως και τότε που...'), αλλά ΜΟΝΟ αν πραγματικά ταιριάζει με τη νέα σκέψη — "
+        "διαφορετικά αγνόησέ το.\n"
+        "- Όχι διάγνωση, όχι bullets· φυσική, ζεστή ροή λόγου.\n"
+        "- Μπορείς να κλείσεις με μία εναλλακτική φράση σε εισαγωγικά, που θα μπορούσε να πει "
+        "ο χρήστης στον εαυτό του.\n"
+    )
 
     user_prompt = (
-        f"PROFILE: {prof or '(none)'}\n"
-        f"ACTIVE_MODE: {active_mode or 'NONE'}\n"
-        f"MODE_WEIGHTS_TOP: {weights_text}\n\n"
-        f"PREV_SUMMARY:\n{(prev_summary or '').strip()}\n\n"
-        f"PREV_THREADS:\n{json.dumps(prev_threads or [], ensure_ascii=False)}\n\n"
-        f"PREV_FACTS:\n{json.dumps(prev_facts or [], ensure_ascii=False)}\n\n"
-        f"LAST_USER:\n{user_text}\n\n"
-        f"LAST_BOT:\n{bot_text}\n\n"
-        "Ενημέρωσε τη μνήμη.\n"
-        "Επιστροφή JSON με ακριβώς αυτά τα keys: summary, threads, facts.\n"
-        "threads/facts να είναι λίστες από strings.\n"
+        f"Δύσκολη σκέψη: {thought}\n"
+        f"Μοτίβο σκέψης: {pattern}\n"
+        f"Ένταση (1-10): {intensity}\n"
+        f"Προφίλ χρήστη: {prof or '(none)'}\n\n"
+        f"ΣΧΕΤΙΚΕΣ ΤΕΧΝΙΚΕΣ (χρησιμοποίησε τουλάχιστον 1):\n{techniques_text}\n\n"
+        f"ΠΡΟΣΩΠΙΚΟ ΙΣΤΟΡΙΚΟ ΧΡΗΣΤΗ:\n{personal_text}\n"
     )
 
     try:
-        res = client.chat.completions.create(
+        response = client.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.25,
-            max_tokens=420,
+            temperature=0.7,
+            max_tokens=280,
         )
-        raw = (res.choices[0].message.content or "").strip()
-        if not raw:
-            return None
-
-        raw_clean = raw.strip()
-        if raw_clean.startswith("```"):
-            raw_clean = raw_clean.strip("`")
-            raw_clean = raw_clean.replace("json", "").strip()
-
-        data = json.loads(raw_clean)
-
-        summary = _safe_trim(str(data.get("summary", "")).strip(), 900)
-        threads = data.get("threads", [])
-        facts = data.get("facts", [])
-
-        if not isinstance(threads, list):
-            threads = []
-        if not isinstance(facts, list):
-            facts = []
-
-        threads = [str(x).strip() for x in threads if str(x).strip()]
-        facts = [str(x).strip() for x in facts if str(x).strip()]
-
-        threads = threads[:8]
-        facts = facts[:8]
-
-        return {"summary": summary, "threads": threads, "facts": facts}
+        out = (response.choices[0].message.content or "").strip()
+        return _safe_trim(out, 700) if out else None
     except Exception:
         return None
 

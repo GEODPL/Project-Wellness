@@ -7,13 +7,26 @@ from typing import Dict, Any, Optional, Tuple, List
 import streamlit.components.v1 as components
 
 import streamlit as st
-from supabase import create_client, Client
+from auth import get_supabase_client, sign_up_user, sign_in_user, sign_out_user, get_user_id, get_user_email
+from storage import load_profile, save_profile, load_chat_state, save_chat_state
+from modes import MODES, detect_sleep_difficulty, detect_mode_weights, choose_active_mode_from_weights, format_mode_blend_text
+from prompts import (
+    safe_trim, remember_bot_output, build_llm_user_prompt,
+    compute_support_need_score, support_need_label, run_wrapup_bundle,
+)
+from reframe import generate_reframe_rag
+from screening import (
+    ANSWER_OPTIONS, SCREENING_INTRO, PHQ9_QUESTIONS, GAD7_QUESTIONS,
+    score_phq9, score_gad7, save_screening_result, load_screening_history,
+)
+from icons import mood_weather_svg, streak_flame_svg
+from pdf_export import generate_wellness_pdf
 import pandas as pd
 import qrcode
-from data_logger import log_user_data
+from checkins import log_checkin, load_checkins_df
 from PIL import Image
 
-from llm import llm_therapeutic_reply, llm_exercise_followup
+from llm import llm_exercise_followup, llm_therapeutic_reply_with_memory
 from rules import (
     personal_reply,
     fallback_therapeutic_reply,
@@ -33,57 +46,23 @@ import hashlib
 from datetime import datetime
 
 # --- ΣΥΝΔΕΣΗ ΜΕ ΤΗ ΒΑΣΗ ΔΕΔΟΜΕΝΩΝ ---
-@st.cache_resource
-def init_supabase() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+# ΣΗΜΑΝΤΙΚΟ: ΔΕΝ χρησιμοποιούμε πλέον @st.cache_resource εδώ, γιατί αυτό θα
+# μοιράζει την ΙΔΙΑ σύνδεση (άρα και το ίδιο auth session) ανάμεσα σε
+# ΟΛΟΥΣ τους χρήστες της εφαρμογής ταυτόχρονα. Κάθε χρήστης (κάθε browser
+# session) πρέπει να έχει τη ΔΙΚΗ ΤΟΥ σύνδεση, ώστε το login του να μην
+# μπερδεύεται με του διπλανού του.
 
-supabase = init_supabase()
+supabase = get_supabase_client()
+
+
+# ============================================================
+# AUTH HELPERS (Supabase Auth)
+# ============================================================
+
 
 #============================================================
-# ΠΡΟΣΩΠΙΚΟ ΠΡΟΦΙΛ ΧΡΗΣΤΗ 
+# ΠΡΟΣΩΠΙΚΟ ΠΡΟΦΙΛ ΧΡΗΣΤΗ
 # ===========================================================
-def _get_user_email():
-    email = (st.session_state.get("user_email") or "").strip().lower()
-    if not email:
-        email = (st.session_state.get("user_name") or "anon").strip().lower()
-    return email or "anon"
-
-def load_profile():
-    user_email = _get_user_email()
-    
-    # 1. Ελέγχουμε την προσωρινή μνήμη για να ξεκλειδώνει αμέσως το chat!
-    if "current_profile" in st.session_state:
-        return st.session_state.current_profile
-        
-    try:
-        response = supabase.table("user_data").select("profile").eq("email", user_email).execute()
-        if len(response.data) > 0:
-            data = response.data[0].get("profile", {})
-            st.session_state.current_profile = data  # Το σώζουμε τοπικά
-            return data
-        else:
-            return {}
-    except Exception as e:
-        st.error(f"⚠️ Σφάλμα φόρτωσης (Supabase): {e}")
-        return {}
-
-def save_profile(new_profile):
-    user_email = _get_user_email()
-    
-    # 2. Αποθηκεύουμε τα δεδομένα κατευθείαν στην προσωρινή μνήμη
-    st.session_state.current_profile = new_profile
-    
-    try:
-        response = supabase.table("user_data").select("email").eq("email", user_email).execute()
-        if len(response.data) == 0:
-            supabase.table("user_data").insert({"email": user_email, "profile": new_profile, "chat_history": {}}).execute()
-        else:
-            supabase.table("user_data").update({"profile": new_profile}).eq("email", user_email).execute()
-    except Exception as e:
-        # Αν η βάση "αρνηθεί" τα δεδομένα, τώρα θα μας πετάξει κόκκινο μήνυμα για να ξέρουμε γιατί!
-        st.error(f"⚠️ Σφάλμα αποθήκευσης (Supabase): {e}")
 
 
 # ============================================================
@@ -129,243 +108,31 @@ def generate_qr_image(url: str) -> Image.Image:
 # NARRATIVE CONTINUITY + MODE BLENDING + EXPLAINABLE LAYER
 # ============================================================
 
-def _safe_trim(text: str, max_chars: int = 1200) -> str:
-    t = (text or "").strip()
-    if len(t) <= max_chars:
-        return t
-    return t[:max_chars].rstrip() + "…"
 
-
-def remember_user_message(user_text: str, max_keep: int = 30) -> None:
-    t = (user_text or "").strip()
-    if not t:
-        return
-    st.session_state.last_user_messages.append(t)
-    st.session_state.last_user_messages = st.session_state.last_user_messages[-max_keep:]
-
-
-def remember_bot_output(bot_text: str, max_keep: int = 20) -> None:
-    t = (bot_text or "").strip()
-    if not t:
-        return
-    st.session_state.last_bot_outputs.append(t)
-    st.session_state.last_bot_outputs = st.session_state.last_bot_outputs[-max_keep:]
-
-
-def get_last_bot_outputs(n: int = 8) -> List[str]:
-    return (st.session_state.get("last_bot_outputs") or [])[-n:]
-
-
-def build_compact_context(max_pairs: int = 10) -> str:
+def compute_current_streak(dates: list) -> int:
     """
-    Compact context για narrative continuity:
-    παίρνει τα τελευταία N ζεύγη user/bot από st.session_state.messages
-    (όχι maps/exercises/plans/emergency).
+    Υπολογίζει το τρέχον streak: πόσες συνεχόμενες ημερολογιακές μέρες
+    (μέχρι σήμερα ή μέχρι χθες) υπάρχει τουλάχιστον 1 check-in.
+    Αν η πιο πρόσφατη καταγραφή είναι πάνω από 1 μέρα πίσω, το streak
+    θεωρείται "σπασμένο" (0), ακριβώς όπως στα γνωστά streak trackers.
     """
-    pairs = []
-    count = 0
-    for sender, content in reversed(st.session_state.get("messages", [])):
-        if sender not in ("user", "bot"):
-            continue
-        role = "Χρήστης" if sender == "user" else "Βοηθός"
-        pairs.append(f"{role}: {str(content).strip()}")
-        count += 1
-        if count >= max_pairs * 2:
+    if not dates:
+        return 0
+    unique_days = sorted({d.date() for d in dates}, reverse=True)
+    if not unique_days:
+        return 0
+
+    today = datetime.now().date()
+    if (today - unique_days[0]).days > 1:
+        return 0
+
+    streak = 1
+    for i in range(1, len(unique_days)):
+        if (unique_days[i - 1] - unique_days[i]).days == 1:
+            streak += 1
+        else:
             break
-    pairs.reverse()
-    return "\n".join(pairs).strip()
-
-
-def detect_phase_and_closure(text: str) -> Tuple[str, bool, List[str]]:
-    """
-    Explainable phase detector.
-    Επιστρέφει: (phase, closing_now, signals)
-    phase: opening | exploration | deepening | closing
-    """
-    t = (text or "").strip().lower()
-    signals = []
-
-    if len(st.session_state.get("messages", [])) <= 1:
-        signals.append("Πρώτο turn → opening")
-        return "opening", False, signals
-
- 
-    closing_phrases = [
-        "ευχαρισ", "οκ", "ok", "εντάξει", "τελ", "τέλος", "αυτά", "τα λεμε", "τα λέμε",
-        "καληνυχ", "bye", "αντίο", "αντιο"
-    ]
-    is_short = len(t) <= 25
-    has_close = any(p in t for p in closing_phrases)
-    closing_now = bool(is_short and has_close)
-    if closing_now:
-        signals.append("Σύντομο μήνυμα + closing token → closing")
-        return "closing", True, signals
-
-
-    deep_tokens = ["φοβά", "ντρέπ", "ενοχ", "ενοχή", "νιωθ", "πονά", "δεν αντέχ", "πανικ", "άγχ"]
-    if any(tok in t for tok in deep_tokens) and len(t) > 80:
-        signals.append("Μεγάλο μήνυμα + affect tokens → deepening")
-        return "deepening", False, signals
-
-
-    signals.append("Default → exploration")
-    return "exploration", False, signals
-
-
-def compute_mode_weights(text: str, mood: int, sleep: int, water: int) -> Tuple[Dict[str, float], List[str]]:
-    """
-    Dynamic Mode Blending:
-    Παράγει weights για student/work/sleep/relationships, κανονικοποιημένα.
-    Επιστρέφει weights + explain signals.
-    """
-    t = (text or "").lower()
-    signals = []
-
-    raw = {
-        "student": _score_keywords(t, MODES["student"]["keywords"]),
-        "work": _score_keywords(t, MODES["work"]["keywords"]),
-        "sleep": _score_keywords(t, MODES["sleep"]["keywords"]),
-        "relationships": _score_keywords(t, MODES["relationships"]["keywords"]),
-    }
-
-     
-    for p in MODES["student"].get("linguistic_patterns", []):
-        if p in t:
-            raw["student"] += 2
-            signals.append(f"Student boost: pattern '{p}'")
-
-    if detect_sleep_difficulty(sleep, text):
-        raw["sleep"] += 2
-        signals.append("Sleep boost: sleep difficulty signal")
-
-    if (sleep <= 6 or water <= 4) and raw["work"] > 0:
-        raw["work"] += 2
-        signals.append("Work boost: low sleep/water + work keywords")
-
-    rel_boost = any(x in t for x in ["δεν με καταλαβ", "απόρριψ", "μοναξ", "τσακω", "συγκρου"])
-    if rel_boost:
-        raw["relationships"] += 2
-        signals.append("Relationships boost: relational distress tokens")
-
-
-    if looks_a_bit_strained(mood, sleep, water):
-        raw["sleep"] += 1
-        signals.append("Baseline: strained check-in → +sleep weight")
-
-
-    total = sum(raw.values())
-    if total <= 0:
-        signals.append("No strong keywords → fallback weights")
-        return {"student": 0.15, "work": 0.15, "sleep": 0.45, "relationships": 0.25}, signals
-
-    weights = {k: v / total for k, v in raw.items()}
-    return weights, signals
-
-
-def pick_primary_mode(weights: Dict[str, float]) -> Optional[str]:
-    if not weights:
-        return None
-    best = max(weights, key=lambda k: weights[k])
-    return best if weights[best] >= 0.34 else None
-
-
-def blend_mode_instructions(weights: Dict[str, float]) -> str:
-    """
-    Μετατρέπει τα weights σε blended coaching instructions που περνάνε στο LLM.
-    """
-    if not weights:
-        return ""
-
-
-    top = sorted(weights.items(), key=lambda x: x[1], reverse=True)[:2]
-    top_modes = [k for k, _ in top]
-
-    chunks = []
-    if "student" in top_modes:
-        chunks.append("Πλαίσιο σπουδών: μικρά, ρεαλιστικά βήματα, αποφυγή τελειομανίας, ήπια δομή.")
-    if "work" in top_modes:
-        chunks.append("Πλαίσιο εργασίας: όρια, αποφόρτιση, ιεράρχηση, αποφυγή υπερ-ευθύνης.")
-    if "sleep" in top_modes:
-        chunks.append("Πλαίσιο ύπνου/αποκατάστασης: πολύ ήπιος τόνος, μικρές παρεμβάσεις, μείωση διέγερσης.")
-    if "relationships" in top_modes:
-        chunks.append("Πλαίσιο σχέσεων: συναίσθημα/ανάγκες/όρια, κατανόηση χωρίς επίθεση, μικρές πράξεις σύνδεσης.")
-
-    wtxt = ", ".join([f"{k}={weights[k]:.2f}" for k in top_modes])
-    return f"Dynamic mode blending (top): {wtxt}. " + " ".join(chunks)
-
-
-def build_llm_user_prompt(
-            raw_user_text: str, mood_value: int, sleep: int, water: int,
-            active_mode: Optional[str], mode_weights: dict,
-        ) -> str:
-            ctx = build_compact_context(max_pairs=10)
-            summary = (st.session_state.conversation_summary or "").strip()
-            threads = st.session_state.open_threads or []
-            facts = st.session_state.facts_memory or []
-
-            profile_snip_parts = []
-            for k in ["context", "main_goals", "main_struggles", "helpful_things", "preferred_tone", "triggers", "soothing_things"]:
-                v = (profile.get(k) or "").strip()
-                if v: profile_snip_parts.append(f"- {k}: {v}")
-            profile_snip = "\n".join(profile_snip_parts).strip()
-
-            mode_instructions = []
-            top2 = sorted(mode_weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
-            for mode_key, w in top2:
-                label = MODES.get(mode_key, {}).get("label", mode_key)
-                mode_instructions.append(f"- {label} (weight={w:.2f})")
-            mode_text = "\n".join(mode_instructions) if mode_instructions else "- None"
-
-            avoid = st.session_state.last_bot_outputs[-6:] if st.session_state.last_bot_outputs else []
-            lang_directive = _t("- Απάντησε αυστηρά στα Ελληνικά.", "- Respond strictly in English.")
-
-            prompt = f"""
-ΣΥΣΤΗΜΑ ΣΥΝΟΧΗΣ (Narrative Continuity Layer):
-- Διατήρησε συνοχή με βάση το ιστορικό και τη rolling memory.
-- Μην κάνεις διάγνωση, μην δίνεις κλινικές ιατρικές οδηγίες.
-
-CHECK-IN:
-- mood: {mood_value}/10
-- sleep: {sleep}
-- water: {water}
-
-DYNAMIC MODE BLEND (Top-2):
-{mode_text}
-Active mode: {active_mode or "NONE"}
-
-PROFILE SNIPPET:
-{profile_snip if profile_snip else "- (no extra profile context)"}
-
-ROLLING SUMMARY:
-{summary if summary else "- (empty)"}
-
-OPEN THREADS:
-{("- " + "\n- ".join(threads)) if threads else "- (none)"}
-
-FACTS MEMORY:
-{("- " + "\n- ".join(facts)) if facts else "- (none)"}
-
-ΤΕΛΕΥΤΑΙΟ CONTEXT:
-{ctx if ctx else "- (no prior turns)"}
-
-ANTI-REPEAT:
-{("- " + "\n- ".join(avoid)) if avoid else "- (none)"}
-
-ΚΛΙΝΙΚΟ ΣΤΥΛ ΚΑΙ ΨΥΧΟΛΟΓΙΚΗ ΕΜΒΑΘΥΝΣΗ (ΟΔΗΓΙΕΣ):
-{lang_directive}
-- Υιοθέτησε το στυλ ενός έμπειρου ψυχολόγου/συμβούλου ευεξίας με βαθιά ενσυναίσθηση και θεραπευτική παρουσία.
-- Οι απαντήσεις πρέπει να είναι εκτενείς, αναλυτικές και να μην μένουν στην επιφάνεια των πραγμάτων. 
-- Εμβάθυνε στο συναίσθημα και στο πρόβλημα που περιγράφει ο χρήστης. Προσπάθησε να συνδέσεις όσα λέει με το ιστορικό του (Rolling Summary), τις δυσκολίες του (Profile) και τις τρέχουσες μετρήσεις του.
-- Κάνε ουσιαστική συναισθηματική επικύρωση (validation) με ζεστό τρόπο, δείχνοντας ότι κατανοείς το βάρος της κατάστασης, πριν προχωρήσεις σε ερωτήσεις.
-- Χρησιμοποίησε τη Μαιευτική Μέθοδο (Socratic Questioning) για να βοηθήσεις τον χρήστη να αναστοχαστεί και να δει βαθύτερα μοτίβα στη συμπεριφορά ή τις σκέψεις του.
-- Δώσε έκταση και χώρο στο κείμενο για να αναπτυχθεί η σκέψη σου. Αποφέυγε τις σύντομες ή βιαστικές απαντήσεις.
-- Όχι bullets. Η ροή του λόγου πρέπει να είναι συνεχής, φυσική και θεραπευτική.
-- Μην εμφανίσεις reasoning μέσα στο κυρίως μήνυμα.
-
-ΜΗΝΥΜΑ ΧΡΗΣΤΗ:
-{raw_user_text}
-""".strip()
-            return prompt
+    return streak
 
 
 def infer_age_range(age: Any) -> str:
@@ -406,38 +173,6 @@ def looks_a_bit_strained(mood: int, sleep: int, water: int) -> bool:
     return (m <= 6) or (s <= 5) or (w <= 4)
 
 
-def detect_study_anxiety(text: str) -> bool:
-    t = (text or "").lower()
-    anxiety_words = ["άγχ", "αγχος", "στρες", "stress", "πανικ", "πίεσ", "πιεσ"]
-    study_words = [
-        "σπουδ", "σχολή", "σχολη", "πανεπιστ", "εξετάσ", "εξετασ",
-        "εργασία", "εργασια", "μαθημα", "μάθημα", "διάβασ", "διαβασ",
-        "προθεσμ", "deadline", "παράδοσ", "παραδοσ",
-    ]
-    has_anxiety = any(w in t for w in anxiety_words)
-    has_study = any(w in t for w in study_words)
-    return has_anxiety and has_study
-
-
-def detect_sleep_difficulty(sleep_hours: int, text: str) -> bool:
-    try:
-        s = int(sleep_hours)
-    except (TypeError, ValueError):
-        s = 0
-
-    t = (text or "").lower()
-    poor_sleep_hours = s <= 6  
-    sleep_keywords = [
-        "αϋπν", "αυπν",
-        "δεν κοιμ", "δεν μπορω να κοιμ", "δεν μπορώ να κοιμ",
-        "ξυπν", "ξύπν",
-        "δεν κοιμηθ", "λίγο ύπνο", "λιγο υπνο",
-        "σκέψεις πριν τον ύπνο", "σκεψεις πριν τον υπνο",
-        "υπερένταση", "υπερενταση",
-    ]
-    mentions_sleep = any(w in t for w in sleep_keywords)
-    return poor_sleep_hours or mentions_sleep
-
 from llm import micro_prompt_with_fallback
 
 def get_chat_tail_from_state(max_n: int = 6) -> list[str]:
@@ -447,354 +182,20 @@ def get_chat_tail_from_state(max_n: int = 6) -> list[str]:
             tail.append(str(content or "").strip())
     return [t for t in tail if t][-max_n:]
 
-def get_chat_tail(messages, max_items: int = 10):
-    """
-    Επιστρέφει τα τελευταία max_items ως καθαρό κείμενο για context injection.
-    messages: list[tuple(sender, content)]
-    """
-    tail = []
-    for sender, content in messages[-max_items:]:
-        if sender in ("user", "bot"):
-            tail.append(f"{sender.upper()}: {content}")
-    return "\n".join(tail).strip()
-
-def update_narrative_memory(
-    profile: dict,
-    active_mode: str,
-    user_text: str,
-    bot_text: str,
-):
-    """
-    Ενημερώνει:
-    - conversation_summary (rolling)
-    - open_threads (εκκρεμή θέματα)
-    - facts_memory (προαιρετικά)
-    """
-
-    from llm import llm_update_memory  
-
-    prev_summary = st.session_state.conversation_summary
-    prev_threads = st.session_state.open_threads
-    prev_facts = st.session_state.facts_memory
-
-    out = llm_update_memory(
-        profile=profile,
-        active_mode=active_mode,
-        prev_summary=prev_summary,
-        prev_threads=prev_threads,
-        prev_facts=prev_facts,
-        user_text=user_text,
-        bot_text=bot_text,
-    )
-
-    if out is None:
-        
-        return
-
-    st.session_state.conversation_summary = out.get("summary", prev_summary) or prev_summary
-    st.session_state.open_threads = out.get("threads", prev_threads) or prev_threads
-    st.session_state.facts_memory = out.get("facts", prev_facts) or prev_facts
-
-def detect_dialogue_closure(text: str) -> bool:
-    """
-    Heuristic κλείσιμο διαλόγου.
-    Σήματα: ευχαριστώ/οκ/τέλος/καληνύχτα/αυτά ήταν/εντάξει/νομίζω οκ κτλ.
-    """
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-
-    closing_phrases = [
-        "ευχαρισ", "thanks", "οκ", "ok", "εντάξει", "τελ", "τέλος",
-        "αυτά", "αυτα ηταν", "νομίζω είμαι οκ", "νομιζω ειμαι οκ",
-        "καληνυχ", "τα λέμε", "τα λεμε", "bye", "αντίο", "αντιο",
-        "όλα καλά", "ολα καλα", "that's all", "αρκεί", "αρκεi"
-    ]
-
-    
-    short = len(t) <= 25
-    has_close_word = any(p in t for p in closing_phrases)
-    return has_close_word and short
-
-
-def run_wrapup_bundle(
-    mood_value: int,
-    sleep: int,
-    water: int,
-    last_user_text: str,
-    profile: dict,
-    active_mode: str,
-    decision_trace: list,
-) -> None:
-    """
-    Εκτελεί το “τέλος”: συμπεράσματα + χάρτης + άσκηση.
-    Όλα μπαίνουν στο chat ως messages.
-    """
-    
-    wrap_prompt = f"""
-Θέλω να κλείσεις τον διάλογο με ήρεμο τρόπο.
-Δώσε:
-(α) 4–7 προτάσεις με βασικά συμπεράσματα/μοτίβα που εμφανίστηκαν,
-(β) 2 πολύ μικρά, εφαρμόσιμα βήματα για τις επόμενες 24 ώρες,
-(γ) 1 φράση κλεισίματος.
-Χωρίς διάγνωση, χωρίς “πρέπει”.
-Mode: {active_mode}
-""".strip()
-
-    enriched = build_llm_user_prompt(
-        raw_user_text=wrap_prompt,
-        mood_value=mood_value,
-        sleep=sleep,
-        water=water,
-        active_mode=active_mode,
-    )
-
-    closing = llm_therapeutic_reply(
-        mood=mood_value,
-        sleep=sleep,
-        water=water,
-        user_text=enriched,
-        profile=profile,
-        active_mode=active_mode,
-    )
-
-    if closing:
-        closing = _safe_trim(closing, 1400)
-        st.session_state.messages.append(("bot", closing))
-        remember_bot_output(closing)
-        decision_trace.append("Wrap-up: παρήχθη σύνοψη/συμπεράσματα μέσω LLM.")
-    else:
-         
-        closing_rb = "Σε ευχαριστώ που το μοιράστηκες. Κράτα ένα μικρό, πρακτικό βήμα για σήμερα και πήγαινε απαλά."
-        st.session_state.messages.append(("bot", closing_rb))
-        remember_bot_output(closing_rb)
-        decision_trace.append("Wrap-up: LLM δεν επέστρεψε αποτέλεσμα → απλό fallback κλείσιμο.")
-
-    
-    map_html = render_emotional_map(mood_value, sleep, water, last_user_text)
-    st.session_state.messages.append(("map", map_html))
-    decision_trace.append("Wrap-up: προστέθηκε συναισθηματικός χάρτης.")
-
-    
-    ex = exercise_suggestion(mood_value, sleep, water, last_user_text)
-    st.session_state.messages.append(("exercise", ex))
-    decision_trace.append("Wrap-up: προστέθηκε μικρή άσκηση ημέρας.")
-
-
-
 
 # ============================================================
 # MODES (Contextual Coaches)
 # ============================================================
-
-MODES: Dict[str, Dict[str, Any]] = {
-    "student": {
-        "label": "Φοιτητική ευεξία",
-        "keywords": [
-            "σχολή", "σχολη", "πανεπιστ", "διάβασ", "διαβασ", "μάθημα", "μαθημα",
-            "εξετασ", "προθεσμ", "deadline", "παράδοση", "παραδοση",
-            "δεν προλαβαίνω", "δεν προλαβαινω", "είμαι πίσω", "ειμαι πισω",
-            "αναβλητικ", "κοπωση", "γνωστικ", "διάσπαση", "συγκέντρ", "συγκεντρ",
-        ],
-        "linguistic_patterns": ["δεν προλαβαινω", "είμαι πίσω", "ειμαι πισω"],
-    },
-    "work": {
-        "label": "Εργασιακό στρες",
-        "keywords": [
-            "δουλει", "εργασια", "job", "office", "γραφειο", "αφεντικ",
-            "burnout", "καμμένος", "καμενος", "τρέχω", "τρεχω", "δεν φτάνω", "δεν φτανω",
-            "όρια", "ορια", "υπερωρ", "πίεση", "πιεση",
-        ],
-        "weight_sleep_water": True,
-    },
-    "sleep": {
-        "label": "Ύπνος & αποκατάσταση",
-        "keywords": [
-            "ύπν", "υπν", "αϋπν", "αυπν", "ξυπν", "ξύπν",
-            "σκέψεις", "σκεψεις", "υπερένταση", "υπερενταση",
-            "δεν κοιμ", "δεν μπορω να κοιμ", "δεν μπορώ να κοιμ",
-        ],
-        "low_threshold": True,
-    },
-    "relationships": {
-        "label": "Σχέσεις & οικογένεια",
-        "keywords": [
-            "μαμα", "μπαμπ", "γονει", "αδελφ", "οικογεν",
-            "σχέση", "σχεση", "αγόρι", "αγορι", "κοπέλα", "κοπελα",
-            "σύντρο", "συντρο", "χωρισ", "ζήλια", "ζηλια",
-            "τσακω", "σύγκρου", "συγκρου", "παρεξηγ", "ένταση", "ενταση",
-            "απόρριψη", "απορριψη", "μοναξ", "δεν με καταλαβαίνουν", "δεν με καταλαβαινουν",
-            "όρια", "ορια",
-        ],
-        "relational": True,
-    },
-}
-
-
-def _score_keywords(text: str, keywords: List[str]) -> int:
-    t = (text or "").lower()
-    score = 0
-    for kw in keywords:
-        if kw in t:
-            score += 1
-    return score
-
-
-def detect_active_mode(text: str, mood: int, sleep: int, water: int) -> Optional[str]:
-    """
-    Επιστρέφει mode key ή None.
-    Heuristic scoring: keywords + context signals.
-    """
-    t = (text or "").lower()
-
-    scores: Dict[str, int] = {
-        "student": _score_keywords(t, MODES["student"]["keywords"]),
-        "work": _score_keywords(t, MODES["work"]["keywords"]),
-        "sleep": _score_keywords(t, MODES["sleep"]["keywords"]),
-        "relationships": _score_keywords(t, MODES["relationships"]["keywords"]),
-    }
-
-    # Boost rules
-    # Student
-    for p in MODES["student"]["linguistic_patterns"]:
-        if p in t:
-            scores["student"] += 2
-
-    # Work 
-    if (sleep <= 6 or water <= 4) and scores["work"] > 0:
-        scores["work"] += 2
-
-    # Sleep
-    if detect_sleep_difficulty(sleep, text):
-        scores["sleep"] += 2
-
-    # Relationships
-    relational_boost = any(x in t for x in ["δεν με καταλαβ", "δεν με καταλαβα", "απόρριψ", "απορριψ", "μοναξ", "τσακω", "συγκρου"])
-    if relational_boost:
-        scores["relationships"] += 2
-
-    # Choose best
-    best_mode = max(scores, key=lambda k: scores[k])
-    best_score = scores[best_mode]
-
-    # Minimum thresholds per mode
-    if best_mode == "sleep":
-        return best_mode if best_score >= 2 else None
-    return best_mode if best_score >= 3 else None
 
 
 # ============================================================
 # MODE-SPECIFIC PLANS 
 # ============================================================
 
-def build_student_week_plan(subfocus: str = "") -> str:
-    header = "Μικρό πλάνο εβδομάδας (σπουδές) – πολύ ήπιο και εφαρμόσιμο:\n\n"
-    core = (
-        "1) **Δύο μικρά blocks την ημέρα (25' + 10')**\n"
-        "   Ένα 25' διάβασμα + 10' «κλείσιμο» (σημείωσε τι έμεινε).\n\n"
-        "2) **Μία «ελάχιστη νίκη»**\n"
-        "   Κάθε μέρα: διάλεξε 1 σελίδα ή 1 άσκηση. Μόνο αυτό αρκεί.\n\n"
-        "3) **Reset πριν ξεκινήσεις (4–2–6, 5 κύκλοι)**\n"
-        "   Για να πέσει ο τόνος του άγχους πριν ανοίξεις βιβλία.\n\n"
-        "Αν είσαι «πίσω», δεν σημαίνει αποτυχία. Συνήθως σημαίνει ότι χρειάζεσαι καλύτερη δομή και λιγότερη πίεση."
-    )
-    if subfocus:
-        return header + f"Εστίαση: **{subfocus}**\n\n" + core
-    return header + core
-
-
-def build_work_stress_plan() -> str:
-    return (
-        "Μικρό πλάνο αποφόρτισης (εργασιακό στρες):\n\n"
-        "1) **Grounding 30–45''**\n"
-        "   Κοίτα 3 πράγματα γύρω σου, άκου 2 ήχους, νιώσε 1 σημείο του σώματος να ακουμπά (καρέκλα/πάτωμα).\n\n"
-        "2) **Μικρό όριο (μία πρόταση)**\n"
-        "   «Μπορώ να το δω, αλλά θα επανέλθω σε αυτό στις __:__». Δεν είναι αγένεια, είναι ρυθμός.\n\n"
-        "3) **Αποφόρτιση σώματος**\n"
-        "   2 λεπτά τέντωμα ώμων/αυχένα ή μικρή βόλτα στο σπίτι.\n\n"
-        "Στόχος δεν είναι περισσότερη παραγωγικότητα. Στόχος είναι να μην «καίγεσαι»."
-    )
-
-
-def build_sleep_restore_plan() -> str:
-    return (
-        "Μικρό πλάνο ύπνου (ήπιο, μη-ενεργοποιητικό):\n\n"
-        "1) **5 λεπτά «κλείσιμο»**\n"
-        "   2 αργές αναπνοές + 2 τεντώματα + χαμήλωμα φωτός.\n\n"
-        "2) **Αν τρέχουν σκέψεις**\n"
-        "   Γράψε 1 πρόταση: «Αυτό που γυρίζει στο μυαλό μου είναι…». Τέλος.\n\n"
-        "3) **Ήπια φράση**\n"
-        "   «Απόψε κάνω χώρο για ξεκούραση, όχι τελειότητα».\n\n"
-        "Αν ο ύπνος σε επηρεάζει έντονα και επίμονα, αξίζει να το συζητήσεις και με επαγγελματία υγείας."
-    )
-
-
-def build_relationships_plan() -> str:
-    return (
-        "Μικρό relational πλάνο (σχέσεις/οικογένεια):\n\n"
-        "1) **Τι χρειάζομαι πραγματικά; (1 πρόταση)**\n"
-        "   «Αυτό που χρειάζομαι τώρα είναι…» (π.χ. κατανόηση, χώρο, σαφήνεια).\n\n"
-        "2) **Όριο χωρίς επίθεση**\n"
-        "   «Σε ακούω, αλλά δεν μπορώ να το συνεχίσω έτσι. Ας το ξαναπιάσουμε πιο ήρεμα αργότερα.»\n\n"
-        "3) **Μικρή πράξη σύνδεσης**\n"
-        "   Ένα μήνυμα/μια κίνηση που λέει «είμαι εδώ», χωρίς να λύσει τα πάντα.\n\n"
-        "Αν νιώθεις απόρριψη ή ότι «δεν σε καταλαβαίνουν», δεν σημαίνει ότι είσαι υπερβολικός/ή. Σημαίνει ότι πονάς."
-    )
-
-
-def mode_relational_exercise(text: str) -> str:
-    t = (text or "").strip()
-    return (
-        "Μικρή relational άσκηση (60''):\n\n"
-        "• Αν αυτή η κατάσταση ήταν τίτλος, ποιος θα ήταν;\n"
-        "• Τι θα ήθελες να καταλάβει ο άλλος άνθρωπος σε 1 πρόταση;\n"
-        "• Ποιο είναι ένα μικρό όριο που θα σε προστάτευε σήμερα;\n\n"
-        f"Αν θες, γράψε μόνο την 1 πρόταση: «Θέλω να καταλάβεις ότι…»\n\n"
-        f"Σημείωση: {html.escape(t)[:0]}"
-    )
-
 
 # ============================================================
 # THOUGHT REFRAME (Rule-based) !Still!
 # ============================================================
-
-def generate_reframe(thought: str, pattern: str) -> str:
-    t = thought.strip()
-    if not t:
-        return ""
-    base_intro = "Μια πιο τρυφερή, ρεαλιστική ματιά πάνω σε αυτή τη σκέψη θα μπορούσε να είναι:\n\n"
-
-    if pattern == "Καταστροφολογία (τα βλέπω όλα χάλια)":
-        return (
-            base_intro
-            + "«Αυτή τη στιγμή ο νους μου πάει στο χειρότερο σενάριο. "
-              "Στην πραγματικότητα, υπάρχουν και ενδιάμεσες εκδοχές. "
-              "Μπορεί να είναι δύσκολο, αλλά δεν σημαίνει ότι όλα θα καταρρεύσουν.»"
-        )
-    if pattern == "Όλα ή τίποτα (είτε τέλειο είτε αποτυχία)":
-        return (
-            base_intro
-            + "«Δεν χρειάζεται να είναι όλα τέλεια για να έχουν αξία. "
-              "Μπορώ να αναγνωρίσω τα λάθη μου χωρίς να ακυρώνω πλήρως τον εαυτό μου.»"
-        )
-    if pattern == "Διάβασμα σκέψης (υποθέτω τι σκέφτονται οι άλλοι)":
-        return (
-            base_intro
-            + "«Δεν μπορώ να ξέρω με βεβαιότητα τι σκέφτονται οι άλλοι. "
-              "Μπορώ να εξετάσω και την πιθανότητα ότι κάποιοι με βλέπουν πιο ζεστά απ’ όσο φαντάζομαι.»"
-        )
-    if pattern == "Υπεργενίκευση (μια εμπειρία = πάντα έτσι)":
-        return (
-            base_intro
-            + "«Αυτή η εμπειρία ήταν δύσκολη, αλλά δεν σημαίνει ότι θα είναι πάντα έτσι. "
-              "Έχω δικαίωμα να δώσω στον εαυτό μου καινούριες ευκαιρίες.»"
-        )
-    return (
-        base_intro
-        + "«Αυτή η σκέψη φαίνεται πολύ βαριά αυτή τη στιγμή. "
-          "Μπορώ να την αντιμετωπίσω σαν μια άποψη του μυαλού μου, όχι σαν απόλυτη αλήθεια. "
-          "Θα προσπαθήσω να είμαι λίγο πιο επιεικής με τον εαυτό μου καθώς τη σκέφτομαι.»"
-    )
 
 
 # ============================================================
@@ -815,6 +216,8 @@ load_css()
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
 if "user_name" not in st.session_state:
     st.session_state.user_name = ""
 if "user_email" not in st.session_state:
@@ -886,47 +289,239 @@ if "last_user_messages" not in st.session_state:
 
 
 # ============================================================
-# LOGIN GATE
+# LOGIN GATE (Supabase Auth: Σύνδεση / Εγγραφή)
 # ============================================================
 
 if not st.session_state.logged_in:
+    _LOGIN_BRAND_MARK = """<svg width="64" height="64" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+<circle cx="36" cy="34" r="14" stroke="white" stroke-width="2"/>
+<path d="M36 14V20M36 48V54M16 34H10M62 34H56M22.4 20.4L18.2 16.2M53.8 16.2L49.6 20.4" stroke="white" stroke-width="2" stroke-linecap="round"/>
+<path d="M6 54H66" stroke="white" stroke-width="2.4" stroke-linecap="round" opacity="0.85"/>
+</svg>"""
+
     st.markdown(
         """
-        <div class="main-wrapper">
-          <div class="chat-card">
-            <h2 style="margin-top:0;">🧠 Project Wellness – Είσοδος</h2>
-            <p style="color:#6C5A9E; font-size:0.96rem;">
-              Πριν συνεχίσουμε, γράψε ένα όνομα χρήστη και το Gmail σου.
-              Έτσι μπορώ να ξεχωρίζω τα δεδομένα σου στο ίδιο περιβάλλον.
-            </p>
+        <style>
+        .login-hero{
+            height: 100%; min-height: 420px;
+            border-radius: 26px;
+            padding: 2.4rem 2rem;
+            display:flex; flex-direction:column; justify-content:center; align-items:flex-start;
+            background: linear-gradient(160deg, var(--twilight-lilac) 0%, var(--twilight-rose) 55%, var(--twilight-ember) 130%);
+            box-shadow: var(--shadow-soft);
+            animation: cardFadeIn var(--transition-med);
+        }
+        .login-hero h1{
+            font-family: var(--font-display); font-size: 2.1rem; font-weight: 600;
+            margin: 1rem 0 0.6rem 0; color: #ffffff;
+        }
+        .login-hero p{
+            font-size: 0.98rem; line-height: 1.6; color: rgba(255,255,255,0.92);
+            max-width: 320px; margin: 0;
+        }
+        .login-form-card{
+            height: 100%; min-height: 420px;
+            display:flex; flex-direction:column; justify-content:center;
+        }
+        .login-form-card h2{
+            font-family: var(--font-display); margin-top: 0; margin-bottom: 0.3rem;
+            color: var(--twilight-deep);
+        }
+        .login-form-card .login-sub{
+            color: var(--text-soft); font-size: 0.92rem; margin-bottom: 1.2rem;
+        }
+        </style>
         """,
         unsafe_allow_html=True,
     )
 
-    login_name = st.text_input("Όνομα χρήστη", value=st.session_state.user_name)
-    login_email = st.text_input("Gmail", value=st.session_state.user_email)
+    col_hero, col_form = st.columns([1, 1.15], gap="medium")
 
-    col_lg1, col_lg2 = st.columns([1, 2])
-    with col_lg1:
-        if st.button("Είσοδος"):
-            email = (login_email or "").strip().lower()
-            name = (login_name or "").strip()
-            if not name:
-                st.error("Γράψε ένα όνομα χρήστη 🙂")
-            elif not email or "@gmail.com" not in email:
-                st.error("Χρειάζομαι ένα έγκυρο Gmail (π.χ. example@gmail.com).")
-            else:
-                st.session_state.user_name = name
-                st.session_state.user_email = email
-                st.session_state.logged_in = True
-                st.success(f"Καλώς ήρθες, {name}!")
-                st.rerun()
-
-    with col_lg2:
-        st.caption(
-            "Το email χρησιμοποιείται μόνο για να ξεχωρίζουν τα δεδομένα κάθε χρήστη "
-            "στο ίδιο περιβάλλον. Δεν στέλνω πουθενά μηνύματα."
+    with col_hero:
+        st.markdown(
+            f"""
+            <div class="login-hero">
+              {_LOGIN_BRAND_MARK}
+              <h1>Project Wellness</h1>
+              <p>
+                Μικρά, καθημερινά check-ins για τη διάθεση, τον ύπνο και την ενυδάτωσή σου —
+                σαν ένα προσωπικό δελτίο καιρού για το πώς νιώθεις. Μια ήρεμη στιγμή παύσης,
+                κάθε μέρα.
+              </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+
+    with col_form:
+        st.markdown('<div class="chat-card login-form-card">', unsafe_allow_html=True)
+        st.markdown("<h2>Καλώς ήρθες</h2>", unsafe_allow_html=True)
+        st.markdown(
+            "<p class='login-sub'>Συνδέσου ή δημιούργησε λογαριασμό για να συνεχίσουμε. "
+            "Τα δεδομένα σου προστατεύονται με πραγματικό λογαριασμό (email + κωδικός).</p>",
+            unsafe_allow_html=True,
+        )
+
+        auth_tab_login, auth_tab_signup = st.tabs(["🔑 Σύνδεση", "🆕 Εγγραφή"])
+
+        # --------------------------------------------------------
+        # ΣΥΝΔΕΣΗ
+        # --------------------------------------------------------
+        with auth_tab_login:
+            login_email = st.text_input("Email", key="login_email")
+            login_password = st.text_input("Κωδικός", type="password", key="login_password")
+
+            if st.button("Σύνδεση", key="btn_login", use_container_width=True):
+                email = (login_email or "").strip().lower()
+                password = login_password or ""
+
+                if not email or not password:
+                    st.error("Συμπλήρωσε email και κωδικό.")
+                else:
+                    res, err = sign_in_user(email, password)
+                    if err:
+                        st.error(f"⚠️ Αποτυχία σύνδεσης: {err}")
+                    elif res and res.user:
+                        st.session_state.logged_in = True
+                        st.session_state.user_id = res.user.id
+                        st.session_state.user_email = res.user.email
+
+                        # Προσπαθούμε να ανακτήσουμε το αποθηκευμένο όνομα από το προφίλ
+                        fallback_name = (res.user.email or "").split("@")[0]
+                        try:
+                            prof_res = (
+                                supabase.table("user_profiles")
+                                .select("profile")
+                                .eq("id", res.user.id)
+                                .execute()
+                            )
+                            if prof_res.data and (prof_res.data[0].get("profile") or {}).get("name"):
+                                st.session_state.user_name = prof_res.data[0]["profile"]["name"]
+                            else:
+                                st.session_state.user_name = fallback_name
+                        except Exception:
+                            st.session_state.user_name = fallback_name
+
+                        st.success("Καλωσήρθες πίσω!")
+                        st.rerun()
+
+        # --------------------------------------------------------
+        # ΕΓΓΡΑΦΗ
+        # --------------------------------------------------------
+        with auth_tab_signup:
+            signup_name = st.text_input("Όνομα χρήστη", key="signup_name")
+            signup_email = st.text_input("Email", key="signup_email")
+            signup_password = st.text_input(
+                "Κωδικός (τουλάχιστον 6 χαρακτήρες)", type="password", key="signup_password"
+            )
+            signup_password2 = st.text_input(
+                "Επιβεβαίωση κωδικού", type="password", key="signup_password2"
+            )
+
+            if st.button("Δημιουργία λογαριασμού", key="btn_signup", use_container_width=True):
+                name = (signup_name or "").strip()
+                email = (signup_email or "").strip().lower()
+                password = signup_password or ""
+
+                if not name:
+                    st.error("Γράψε ένα όνομα χρήστη 🙂")
+                elif not email or "@" not in email:
+                    st.error("Χρειάζομαι ένα έγκυρο email.")
+                elif len(password) < 6:
+                    st.error("Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.")
+                elif password != signup_password2:
+                    st.error("Οι κωδικοί δεν ταιριάζουν.")
+                else:
+                    res, err = sign_up_user(email, password)
+                    if err:
+                        st.error(f"⚠️ Αποτυχία εγγραφής: {err}")
+                    elif res and res.user:
+                        st.session_state.logged_in = True
+                        st.session_state.user_id = res.user.id
+                        st.session_state.user_email = res.user.email
+                        st.session_state.user_name = name
+
+                        # Αποθηκεύουμε αμέσως το όνομα στο προφίλ, ώστε να υπάρχει
+                        # έτοιμο την επόμενη φορά που θα κάνει login.
+                        try:
+                            supabase.table("user_profiles").insert(
+                                {"id": res.user.id, "profile": {"name": name}, "chat_history": {}}
+                            ).execute()
+                        except Exception:
+                            pass
+
+                        st.success(f"Καλώς ήρθες, {name}! Ο λογαριασμός σου δημιουργήθηκε.")
+                        st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.stop()
+
+
+# ============================================================
+# ONBOARDING (εμφανίζεται ΜΙΑ φορά, μετά το πρώτο login/signup)
+# ============================================================
+
+_onboarding_profile = load_profile()
+
+if not _onboarding_profile.get("onboarding_completed"):
+    _greet_name = st.session_state.get("user_name", "")
+    _ONBOARD_BRAND_MARK = """<svg width="52" height="52" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+<circle cx="36" cy="34" r="14" stroke="white" stroke-width="2"/>
+<path d="M36 14V20M36 48V54M16 34H10M62 34H56M22.4 20.4L18.2 16.2M53.8 16.2L49.6 20.4" stroke="white" stroke-width="2" stroke-linecap="round"/>
+<path d="M6 54H66" stroke="white" stroke-width="2.4" stroke-linecap="round" opacity="0.85"/>
+</svg>"""
+
+    st.markdown(
+        f"""
+        <div class="login-hero" style="min-height: 220px; margin-top: 0.6rem;">
+          {_ONBOARD_BRAND_MARK}
+          <h1 style="font-size: 1.7rem; margin-top: 0.7rem;">
+            Καλωσήρθες{f", {_greet_name}" if _greet_name else ""}!
+          </h1>
+          <p style="max-width: 480px;">
+            Πριν ξεκινήσουμε, μια πολύ σύντομη ξενάγηση σε ό,τι θα βρεις εδώ μέσα.
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="main-wrapper"><div class="chat-card">', unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <h4 style="margin-top:0;">🗺️ Οι καρτέλες της εφαρμογής</h4>
+        <ul style="line-height:1.9; color: var(--text-main);">
+          <li>💬 <strong>Chat</strong> — μίλησέ μου ελεύθερα για τη μέρα σου, κρατάμε το νήμα της συζήτησης</li>
+          <li>📁 <strong>Ιστορικό</strong> — μια ήρεμη ματιά στις προηγούμενες καταγραφές σου</li>
+          <li>📊 <strong>Στατιστικά</strong> — τάσεις διάθεσης / ύπνου / νερού με τον καιρό, και το streak σου</li>
+          <li>🧘 <strong>Ασκήσεις</strong> — μικρές, διαδραστικές ασκήσεις φροντίδας</li>
+          <li>🩺 <strong>Αξιολόγηση</strong> — δύο σύντομα, επιστημονικά εργαλεία (PHQ-9 / GAD-7)</li>
+          <li>🧩 <strong>Thought Reframe Studio</strong> — βοήθεια στο να δεις δύσκολες σκέψεις από πιο τρυφερή οπτική</li>
+        </ul>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="emergency-block" style="margin-top: 0.8rem;">
+          <strong>Μια σημαντική σημείωση:</strong> αυτή η εφαρμογή είναι εργαλείο αυτοβοήθειας,
+          δεν αντικαθιστά ψυχολόγο ή ψυχίατρο. Αν βρεθείς σε κίνδυνο, κάλεσε το
+          <strong>112</strong> ή τη Γραμμή Παρέμβασης <strong>1018</strong>.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_ob1, col_ob2, col_ob3 = st.columns([1, 1.4, 1])
+    with col_ob2:
+        if st.button("🚀 Ξεκινάμε", key="btn_onboarding_done", use_container_width=True):
+            _onboarding_profile["onboarding_completed"] = True
+            save_profile(_onboarding_profile)
+            st.rerun()
 
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
@@ -953,12 +548,23 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# --- Λογαριασμός / Αποσύνδεση ---
+with st.sidebar:
+    st.markdown(f"**👤 {st.session_state.get('user_name','')}**")
+    st.caption(st.session_state.get("user_email", ""))
+    if st.button("🚪 Αποσύνδεση", use_container_width=True):
+        sign_out_user()
+        for key in ["logged_in", "user_id", "user_email", "user_name", "current_profile"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
 tabs = st.tabs(
     [
         "Chat",
         "Ιστορικό",
         "Στατιστικά",
         "Ασκήσεις",
+        "🩺 Αξιολόγηση",
         "Thought Reframe Studio",
         "Προφίλ",
         "Σύνδεση από κινητό",
@@ -971,6 +577,7 @@ tabs = st.tabs(
     tab_history,
     tab_stats,
     tab_ex,
+    tab_screening,
     tab_reframe,
     tab_profile,
     tab_mobile,
@@ -1029,71 +636,11 @@ with tab_chat:
         )
     else:
 
-        def _load_persisted_chat_state() -> dict:
-            user_email = _get_user_email()
-            try:
-                res = supabase.table("user_data").select("chat_history").eq("email", user_email).execute()
-                if len(res.data) > 0 and res.data[0].get("chat_history"):
-                    data = res.data[0]["chat_history"]
-                    if isinstance(data, dict):
-                        return data
-                    elif isinstance(data, list):
-                        return {"messages": data}
-                return {}
-            except Exception:
-                return {}
-
-        def _save_persisted_chat_state(state: dict) -> None:
-            user_email = _get_user_email()
-            try:
-                # Διασφαλίζουμε ότι η εγγραφή υπάρχει (αν π.χ. δημιουργήθηκε τώρα)
-                res = supabase.table("user_data").select("email").eq("email", user_email).execute()
-                if len(res.data) == 0:
-                    supabase.table("user_data").insert({
-                        "email": user_email, 
-                        "profile": {}, 
-                        "chat_history": state
-                    }).execute()
-                else:
-                    supabase.table("user_data").update({"chat_history": state}).eq("email", user_email).execute()
-            except Exception as e:
-                print(f"Chat save error: {e}")
 
         # ============================================================
         # Core helpers
         # ============================================================
-        def _safe_trim(text: str, max_chars: int = 1400) -> str:
-            t = (text or "").strip()
-            if len(t) <= max_chars:
-                return t
-            return t[:max_chars].rstrip() + "…"
 
-        def _clamp_int(x: float, lo: int = 0, hi: int = 100) -> int:
-            try:
-                v = int(round(float(x)))
-            except Exception:
-                v = 0
-            return max(lo, min(hi, v))
-
-        def remember_bot_output(text: str) -> None:
-            t = (text or "").strip()
-            if not t:
-                return
-            st.session_state.last_bot_outputs.append(t)
-            st.session_state.last_bot_outputs = st.session_state.last_bot_outputs[-8:]
-
-        def _get_dialogue_context_text(max_pairs: int = 10) -> str:
-            items = []
-            count = 0
-            for sender, content in st.session_state.messages[::-1]:
-                if sender in ("user", "bot"):
-                    role = "Χρήστης" if sender == "user" else "Βοηθός"
-                    items.append(f"{role}: {str(content).strip()}")
-                    count += 1
-                if count >= max_pairs * 2:
-                    break
-            items = list(reversed(items))
-            return "\n".join(items).strip()
 
         def _detect_dialogue_closure(text: str) -> bool:
             t = (text or "").strip().lower()
@@ -1107,333 +654,6 @@ with tab_chat:
             shortish = len(t) <= 35
             return shortish and any(c in t for c in closures)
 
-        def _score_keywords(text: str, keywords: list[str]) -> int:
-            t = (text or "").lower()
-            return sum(1 for kw in keywords if kw in t)
-
-        def detect_mode_weights(text: str, mood: int, sleep: int, water: int) -> dict:
-            t = (text or "").lower()
-
-            scores = {
-                "student": _score_keywords(t, MODES["student"]["keywords"]),
-                "work": _score_keywords(t, MODES["work"]["keywords"]),
-                "sleep": _score_keywords(t, MODES["sleep"]["keywords"]),
-                "relationships": _score_keywords(t, MODES["relationships"]["keywords"]),
-            }
-
-            # boosts
-            for p in MODES["student"].get("linguistic_patterns", []):
-                if p in t:
-                    scores["student"] += 2
-
-            if (sleep <= 6 or water <= 4) and scores["work"] > 0:
-                scores["work"] += 2
-
-            if detect_sleep_difficulty(sleep, text):
-                scores["sleep"] += 2
-
-            relational_boost = any(
-                x in t for x in ["δεν με καταλαβ", "δεν με καταλαβα", "απόρριψ", "απορριψ", "μοναξ", "τσακω", "συγκρου"]
-            )
-            if relational_boost:
-                scores["relationships"] += 2
-
-            
-            if all(v == 0 for v in scores.values()):
-                if sleep <= 6:
-                    scores["sleep"] = 2
-                elif mood <= 5:
-                    scores["student"] = 1
-                    scores["work"] = 1
-                else:
-                    scores["student"] = 1
-
-            total = sum(scores.values())
-            weights = {k: (v / total) for k, v in scores.items()} if total else {k: 0.0 for k in scores}
-
-            sorted_keys = sorted(weights.keys(), key=lambda k: weights[k], reverse=True)
-            top = sorted_keys[:2]
-            for k in weights:
-                if k not in top:
-                    weights[k] *= 0.6
-            ren = sum(weights.values())
-            if ren > 0:
-                weights = {k: v / ren for k, v in weights.items()}
-
-            return weights
-
-        def choose_active_mode_from_weights(weights: dict) -> Optional[str]:
-            if not weights:
-                return None
-            best = max(weights, key=lambda k: weights[k])
-            return best if float(weights.get(best, 0.0)) >= 0.34 else None
-
-        def _format_mode_blend_text(weights: dict) -> str:
-            order = sorted(weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
-            return ", ".join([f"{k}={v:.2f}" for k, v in order])
-
-        def build_llm_user_prompt(
-            raw_user_text: str,
-            mood_value: int,
-            sleep: int,
-            water: int,
-            active_mode: Optional[str],
-            mode_weights: dict,
-        ) -> str:
-            ctx = _get_dialogue_context_text(max_pairs=10)
-            summary = (st.session_state.conversation_summary or "").strip()
-            threads = st.session_state.open_threads or []
-            facts = st.session_state.facts_memory or []
-
-            profile_snip_parts = []
-            for k in ["context", "main_goals", "main_struggles", "helpful_things", "preferred_tone", "triggers", "soothing_things"]:
-                v = (profile.get(k) or "").strip()
-                if v:
-                    profile_snip_parts.append(f"- {k}: {v}")
-            profile_snip = "\n".join(profile_snip_parts).strip()
-
-            mode_instructions = []
-            top2 = sorted(mode_weights.items(), key=lambda kv: kv[1], reverse=True)[:2]
-            for mode_key, w in top2:
-                label = MODES.get(mode_key, {}).get("label", mode_key)
-                mode_instructions.append(f"- {label} (weight={w:.2f})")
-            mode_text = "\n".join(mode_instructions) if mode_instructions else "- None"
-
-            avoid = st.session_state.last_bot_outputs[-6:] if st.session_state.last_bot_outputs else []
-
-            prompt = f"""
-ΣΥΣΤΗΜΑ ΣΥΝΟΧΗΣ (Narrative Continuity Layer):
-- Διατήρησε συνοχή με βάση το ιστορικό και τη rolling memory.
-- Στόχος: φυσικός διάλογος, όχι κάθε φορά σύνοψη/χάρτης/άσκηση.
-- Μην κάνεις διάγνωση, μην δίνεις ιατρικές οδηγίες.
-
-CHECK-IN:
-- mood: {mood_value}/10
-- sleep: {sleep}
-- water: {water}
-
-DYNAMIC MODE BLEND (Top-2):
-{mode_text}
-Active mode: {active_mode or "NONE"}
-
-PROFILE SNIPPET:
-{profile_snip if profile_snip else "- (no extra profile context)"}
-
-ROLLING SUMMARY:
-{summary if summary else "- (empty)"}
-
-OPEN THREADS:
-{("- " + "\n- ".join(threads)) if threads else "- (none)"}
-
-FACTS MEMORY:
-{("- " + "\n- ".join(facts)) if facts else "- (none)"}
-
-ΤΕΛΕΥΤΑΙΟ CONTEXT:
-{ctx if ctx else "- (no prior turns)"}
-
-ANTI-REPEAT:
-{("- " + "\n- ".join(avoid)) if avoid else "- (none)"}
-
-ΟΔΗΓΙΕΣ:
-- Ελληνικά.
-- 4–10 προτάσεις, φυσικές.
-- 0–2 ερωτήσεις μόνο αν βοηθούν.
-- Όχι bullets.
-- Μην εμφανίσεις reasoning μέσα στο κυρίως μήνυμα.
-
-ΜΗΝΥΜΑ ΧΡΗΣΤΗ:
-{raw_user_text}
-""".strip()
-            return prompt
-
-        def update_narrative_memory_llm(
-            profile: dict,
-            active_mode: Optional[str],
-            mode_weights: dict,
-            user_text: str,
-            bot_text: str,
-            decision_trace: list[str],
-        ) -> None:
-            try:
-                from llm import llm_update_memory
-            except Exception:
-                decision_trace.append("Narrative memory: llm_update_memory δεν βρέθηκε → skip.")
-                return
-
-            prev_summary = st.session_state.conversation_summary
-            prev_threads = st.session_state.open_threads
-            prev_facts = st.session_state.facts_memory
-
-            out = llm_update_memory(
-                profile=profile,
-                active_mode=active_mode or "NONE",
-                mode_weights=mode_weights,
-                prev_summary=prev_summary,
-                prev_threads=prev_threads,
-                prev_facts=prev_facts,
-                user_text=user_text,
-                bot_text=bot_text,
-            )
-            if not out:
-                decision_trace.append("Narrative memory: update failed/None → keep previous.")
-                return
-
-            st.session_state.conversation_summary = (out.get("summary") or prev_summary or "").strip()
-            st.session_state.open_threads = out.get("threads") or prev_threads or []
-            st.session_state.facts_memory = out.get("facts") or prev_facts or []
-            decision_trace.append("Narrative memory: ενημερώθηκαν summary/threads/facts.")
-
-        def compute_support_need_score(
-            text: str,
-            mood: int,
-            sleep: int,
-            water: int,
-            mode_weights: Optional[dict] = None,
-            conversation_summary: str = "",
-            open_threads: Optional[list] = None,
-        ) -> tuple[int, list[str]]:
-            t = (text or "").lower()
-            reasons: list[str] = []
-            score = 0.0
-
-            if mood <= 3:
-                score += 18; reasons.append("πολύ χαμηλή διάθεση (≤3/10)")
-            elif mood <= 5:
-                score += 10; reasons.append("χαμηλή/μέτρια διάθεση (≤5/10)")
-
-            if sleep <= 4:
-                score += 16; reasons.append("πολύ λίγος ύπνος (≤4 ώρες)")
-            elif sleep <= 6:
-                score += 9; reasons.append("λίγος ύπνος (≤6 ώρες)")
-
-            if water <= 3:
-                score += 4; reasons.append("χαμηλή ενυδάτωση (≤3 ποτήρια)")
-
-            high_burden = [
-                "δεν αντεχω", "δεν αντέχω", "κουραστηκα", "κουράστηκα",
-                "δεν παει αλλο", "δεν πάει άλλο", "ειμαι χαλια", "είμαι χάλια",
-                "απελπισ", "απόγνωση", "πανικ", "πανικό", "φοβαμαι", "φοβάμαι",
-                "μονος", "μόνος", "μοναξ", "καταρρε", "καταρρέ",
-                "δεν μπορω", "δεν μπορώ", "δεν βγαινει", "δεν βγαίνει",
-            ]
-            hit_burden = any(p in t for p in high_burden)
-            if hit_burden:
-                score += 14; reasons.append("γλωσσικά σήματα έντονου βάρους/δυσκολίας")
-
-            chronic = ["κάθε μέρα", "καθε μερα", "εδώ και", "εδω και", "μήνες", "μηνες", "εβδομάδες", "εβδομαδες", "πάντα", "παντα"]
-            if any(p in t for p in chronic):
-                score += 8; reasons.append("πιθανή διάρκεια/επιμονή")
-
-            impairment = [
-                "δεν μπορω να λειτουργησω", "δεν μπορώ να λειτουργήσω",
-                "δεν μπορω να σηκωθω", "δεν μπορώ να σηκωθώ",
-                "δεν μπορω να διαβασω", "δεν μπορώ να διαβάσω",
-                "δεν μπορω να δουλεψω", "δεν μπορώ να δουλέψω",
-                "δεν τρωω", "δεν τρώω", "δεν μπορω να φαω", "δεν μπορώ να φάω",
-            ]
-            if any(p in t for p in impairment):
-                score += 12; reasons.append("σήματα δυσκολίας λειτουργικότητας")
-
-            if mode_weights:
-                sleep_w = float(mode_weights.get("sleep", 0.0))
-                work_w = float(mode_weights.get("work", 0.0))
-                if sleep_w >= 0.45 and sleep <= 6:
-                    score += 6; reasons.append("υψηλό βάρος ‘Ύπνος’ + χαμηλός ύπνος")
-                if work_w >= 0.45 and (sleep <= 6 or mood <= 5):
-                    score += 5; reasons.append("υψηλό βάρος ‘Εργασία’ + κόπωση/πίεση")
-
-            threads = open_threads or []
-            if len(threads) >= 3:
-                score += 6; reasons.append("πολλά ανοιχτά θέματα (threads)")
-            if conversation_summary and len(conversation_summary) > 260:
-                score += 3; reasons.append("πλούσιο summary → πιο σύνθετο φορτίο")
-
-            if len((text or "").strip()) <= 12 and not hit_burden:
-                score -= 6
-
-            return _clamp_int(score, 0, 100), reasons
-
-        def support_need_label(score: int) -> tuple[str, str]:
-            if score <= 24:
-                return (
-                    "Χαμηλή ένδειξη",
-                    "Αν σε βοηθά, συνέχισε με μικρά βήματα φροντίδας. Αν επιμείνει ή δυσκολεύει την καθημερινότητα, μια συζήτηση με ειδικό μπορεί να είναι υποστηρικτική."
-                )
-            if score <= 49:
-                return (
-                    "Μέτρια ένδειξη",
-                    "Αν αυτό συνεχίζεται ή σε δυσκολεύει λειτουργικά, θα μπορούσε να βοηθήσει μια συζήτηση με ψυχολόγο, έστω για 1–2 συνεδρίες διερεύνησης."
-                )
-            if score <= 69:
-                return (
-                    "Αυξημένη ένδειξη",
-                    "Με βάση αυτά που γράφεις και το check-in, φαίνεται ότι θα άξιζε επαγγελματική υποστήριξη σύντομα — όχι επειδή “κάτι πάει λάθος”, αλλά για να μην το σηκώνεις μόνος/η."
-                )
-            return (
-                "Υψηλή ένδειξη",
-                "Αυτό ακούγεται αρκετά βαρύ. Αν μπορείς, θα ήταν καλό να μιλήσεις με επαγγελματία μέσα στις επόμενες μέρες. Αν νιώσεις κίνδυνο για την ασφάλειά σου, χρησιμοποίησε άμεσα τις γραμμές βοήθειας."
-            )
-
-        def run_wrapup_bundle(
-            mood_value: int,
-            sleep: int,
-            water: int,
-            last_user_text: str,
-            profile: dict,
-            active_mode: Optional[str],
-            mode_weights: dict,
-            decision_trace: list[str],
-        ) -> None:
-            wrap_raw = (
-                "Κλείσε τον διάλογο ήρεμα.\n"
-                "Δώσε:\n"
-                "1) 4–7 προτάσεις με συμπεράσματα/μοτίβα που εμφανίστηκαν,\n"
-                "2) 2 πολύ μικρά, εφαρμόσιμα βήματα για 24 ώρες,\n"
-                "3) 1 φράση κλεισίματος.\n"
-                "Χωρίς διάγνωση, χωρίς «πρέπει»."
-            )
-
-            wrap_prompt = build_llm_user_prompt(
-                raw_user_text=wrap_raw,
-                mood_value=mood_value,
-                sleep=sleep,
-                water=water,
-                active_mode=active_mode,
-                mode_weights=mode_weights,
-            )
-
-            closing = llm_therapeutic_reply(
-                mood=mood_value,
-                sleep=sleep,
-                water=water,
-                user_text=wrap_prompt,
-                profile=profile,
-                active_mode=active_mode,
-            )
-
-            if closing:
-                closing = _safe_trim(closing, 1500)
-                st.session_state.messages.append(("bot", closing))
-                remember_bot_output(closing)
-                decision_trace.append("Wrap-up: LLM συμπεράσματα/βήματα/κλείσιμο.")
-            else:
-                rb = "Σε ευχαριστώ που το μοιράστηκες. Κράτα ένα μικρό βήμα φροντίδας για σήμερα και πήγαινε απαλά."
-                st.session_state.messages.append(("bot", rb))
-                remember_bot_output(rb)
-                decision_trace.append("Wrap-up: fallback κλείσιμο (LLM None).")
-
-            map_html = render_emotional_map(mood_value, sleep, water, last_user_text)
-            st.session_state.messages.append(("map", map_html))
-            decision_trace.append("Wrap-up: συναισθηματικός χάρτης.")
-
-            ex = exercise_suggestion(mood_value, sleep, water, last_user_text)
-            st.session_state.messages.append(("exercise", ex))
-            decision_trace.append("Wrap-up: άσκηση ημέρας.")
-
-            ex_low = (ex or "").lower()
-            if "διάλεξε" in ex_low and "λέξη" in ex_low:
-                st.session_state.exercise_followup = True
-                decision_trace.append("Wrap-up: άσκηση λέξης → follow-up ενεργό.")
 
         # ============================================================
         # Session state init + load persisted
@@ -1441,9 +661,9 @@ ANTI-REPEAT:
         if "chat_loaded_for_user" not in st.session_state:
             st.session_state.chat_loaded_for_user = {}
 
-        ukey = _get_user_email()
+        ukey = get_user_id()
         if not st.session_state.chat_loaded_for_user.get(ukey, False):
-            persisted = _load_persisted_chat_state()
+            persisted = load_chat_state()
 
             st.session_state.messages = persisted.get("messages", st.session_state.get("messages", [])) or []
             st.session_state.dialogue_active = persisted.get("dialogue_active", False)
@@ -1496,17 +716,31 @@ ANTI-REPEAT:
         st.markdown(
             """
             <style>
-            .pink-metrics-row{display:flex; gap:14px; flex-wrap:wrap; margin: 8px 0 14px 0;}
-            .pink-metric{
+            .checkin-metrics-row{display:flex; gap:14px; flex-wrap:wrap; margin: 8px 0 14px 0;}
+            .checkin-metric{
                 width: 118px; height: 118px; border-radius: 999px;
-                background: rgba(255, 105, 180, 0.14);
-                border: 1px solid rgba(255, 105, 180, 0.28);
                 display:flex; flex-direction:column; align-items:center; justify-content:center;
-                box-shadow: 0 6px 20px rgba(255,105,180,0.08);
+                border: 1px solid transparent;
+                gap: 2px;
             }
-            .pink-metric .v{font-size: 26px; font-weight: 800; color:#4A3D73; line-height: 1;}
-            .pink-metric .t{font-size: 12.5px; font-weight:700; color:#6C5A9E; margin-top:6px;}
-            .pink-metric .p{font-size: 12px; color:#6C5A9E; margin-top:2px;}
+            .checkin-metric.metric-mood{
+                background: rgba(242, 166, 184, 0.16);
+                border-color: rgba(242, 166, 184, 0.32);
+                box-shadow: 0 6px 20px rgba(242, 166, 184, 0.10);
+            }
+            .checkin-metric.metric-sleep{
+                background: rgba(183, 157, 242, 0.16);
+                border-color: rgba(183, 157, 242, 0.32);
+                box-shadow: 0 6px 20px rgba(183, 157, 242, 0.10);
+            }
+            .checkin-metric.metric-water{
+                background: rgba(143, 175, 140, 0.16);
+                border-color: rgba(143, 175, 140, 0.32);
+                box-shadow: 0 6px 20px rgba(143, 175, 140, 0.10);
+            }
+            .checkin-metric .v{font-family: var(--font-mono); font-size: 24px; font-weight: 700; color: var(--twilight-deep); line-height: 1;}
+            .checkin-metric .t{font-size: 12.5px; font-weight:700; color: var(--text-soft); margin-top:2px;}
+            .checkin-metric .p{font-family: var(--font-mono); font-size: 11.5px; color: var(--text-soft); margin-top:1px;}
             </style>
             """,
             unsafe_allow_html=True,
@@ -1533,7 +767,7 @@ ANTI-REPEAT:
                 st.session_state.last_decision_trace = []
 
                 # Καθαρισμός αποθηκευμένης μνήμης χρήστη
-                _save_persisted_chat_state({
+                save_chat_state({
                     "messages": [],
                     "dialogue_active": False,
                     "dialogue_turns": 0,
@@ -1563,20 +797,22 @@ ANTI-REPEAT:
             sleep_pct = int(round((sleep / 10.0) * 100))
             water_pct = int(round((water / 15.0) * 100))
 
+            mood_icon_svg, _mood_icon_color = mood_weather_svg(float(mood_value))
+
             st.markdown(
                 f"""
-                <div class="pink-metrics-row">
-                  <div class="pink-metric">
+                <div class="checkin-metrics-row">
+                  <div class="checkin-metric metric-mood">
+                    {mood_icon_svg}
                     <div class="v">{mood_value}/10</div>
                     <div class="t">Διάθεση</div>
-                    <div class="p">{mood_pct}%</div>
                   </div>
-                  <div class="pink-metric">
+                  <div class="checkin-metric metric-sleep">
                     <div class="v">{sleep}h</div>
                     <div class="t">Ύπνος</div>
                     <div class="p">{sleep_pct}%</div>
                   </div>
-                  <div class="pink-metric">
+                  <div class="checkin-metric metric-water">
                     <div class="v">{water}</div>
                     <div class="t">Νερό</div>
                     <div class="p">{water_pct}%</div>
@@ -1629,13 +865,12 @@ ANTI-REPEAT:
                     emergency_html = emergency_message()
                     st.session_state.messages.append(("emergency", emergency_html))
 
-                    user_email = st.session_state.get("user_email", "")
-                    log_user_data("EMERGENCY", "-", "-", text, email=user_email)
+                    log_checkin(mood_value, sleep, water, text, is_emergency=True)
 
                     st.session_state.last_decision_trace = decision_trace
 
                     # persist
-                    _save_persisted_chat_state({
+                    save_chat_state({
                         "messages": st.session_state.messages,
                         "dialogue_active": st.session_state.dialogue_active,
                         "dialogue_turns": st.session_state.dialogue_turns,
@@ -1656,7 +891,7 @@ ANTI-REPEAT:
                 # 3) Mode blending
                 mode_weights = detect_mode_weights(text, mood_value, sleep, water)
                 active_mode = choose_active_mode_from_weights(mode_weights)
-                decision_trace.append(f"Mode blending: {_format_mode_blend_text(mode_weights)}.")
+                decision_trace.append(f"Mode blending: {format_mode_blend_text(mode_weights)}.")
                 decision_trace.append(f"Active mode: {active_mode or 'NONE'}.")
 
                 # 4) Follow-up 
@@ -1674,7 +909,7 @@ ANTI-REPEAT:
                         active_mode=active_mode,
                     )
                     if followup:
-                        followup = _safe_trim(followup, 900)
+                        followup = safe_trim(followup, 900)
                         st.session_state.messages.append(("bot", followup))
                         remember_bot_output(followup)
                         decision_trace.append("Exercise follow-up: LLM reply.")
@@ -1687,7 +922,7 @@ ANTI-REPEAT:
                     st.session_state.exercise_followup = False
                     st.session_state.last_decision_trace = decision_trace
 
-                    _save_persisted_chat_state({
+                    save_chat_state({
                         "messages": st.session_state.messages,
                         "dialogue_active": st.session_state.dialogue_active,
                         "dialogue_turns": st.session_state.dialogue_turns,
@@ -1726,9 +961,10 @@ ANTI-REPEAT:
                     water=water,
                     active_mode=active_mode,
                     mode_weights=mode_weights,
+                    profile=profile,
                 )
 
-                llm_out = llm_therapeutic_reply(
+                combined = llm_therapeutic_reply_with_memory(
                     mood=mood_value,
                     sleep=sleep,
                     water=water,
@@ -1737,20 +973,19 @@ ANTI-REPEAT:
                     active_mode=active_mode,
                 )
 
-                if llm_out:
-                    llm_out = _safe_trim(llm_out, 1400)
+                if combined:
+                    llm_out = safe_trim(combined["reply"], 1400)
                     st.session_state.messages.append(("bot", llm_out))
                     remember_bot_output(llm_out)
-                    decision_trace.append("Dialogue: LLM reply (continuity+blending).")
+                    decision_trace.append("Dialogue: LLM reply (συνδυασμένη κλήση: reply+memory σε 1 API call).")
 
-                    update_narrative_memory_llm(
-                        profile=profile,
-                        active_mode=active_mode,
-                        mode_weights=mode_weights,
-                        user_text=text,
-                        bot_text=llm_out,
-                        decision_trace=decision_trace,
-                    )
+                    if combined.get("summary"):
+                        st.session_state.conversation_summary = combined["summary"]
+                    if combined.get("threads"):
+                        st.session_state.open_threads = combined["threads"]
+                    if combined.get("facts"):
+                        st.session_state.facts_memory = combined["facts"]
+                    decision_trace.append("Narrative memory: ενημερώθηκαν summary/threads/facts (ίδια κλήση).")
                 else:
                     rb = fallback_therapeutic_reply(mood_value, sleep, water, text)
                     st.session_state.messages.append(("bot", rb))
@@ -1805,9 +1040,8 @@ ANTI-REPEAT:
                     st.session_state.wrapup_done = True
 
                 # 9) Logging
-                user_email = st.session_state.get("user_email", "")
-                log_user_data(mood_value, sleep, water, text, email=user_email)
-                decision_trace.append("Logging: saved to CSV.")
+                log_checkin(mood_value, sleep, water, text, is_emergency=False)
+                decision_trace.append("Logging: saved to Supabase (checkins).")
 
                 # 10) last_checkin
                 st.session_state.last_checkin = {
@@ -1822,7 +1056,7 @@ ANTI-REPEAT:
                 st.session_state.last_decision_trace = decision_trace
 
                 # 11) Persist per-user state
-                _save_persisted_chat_state({
+                save_chat_state({
                     "messages": st.session_state.messages,
                     "dialogue_active": st.session_state.dialogue_active,
                     "dialogue_turns": st.session_state.dialogue_turns,
@@ -1866,272 +1100,217 @@ with tab_history:
         unsafe_allow_html=True,
     )
 
-    # 1) Εντοπίζουμε το CSV 
-    csv_path = os.path.join(os.path.dirname(__file__), "..", "user_data.csv")
+    # Φόρτωση από τη Supabase (αντί για το παλιό, μη προστατευμένο CSV)
+    df_user = load_checkins_df()
 
-    if not os.path.exists(csv_path):
+    if df_user.empty:
         st.info("Δεν υπάρχουν ακόμη καταγραφές. Κάνε πρώτα ένα check-in στην καρτέλα «Chat».")
     else:
-        try:
-            df = pd.read_csv(csv_path)
-        except Exception:
-            try:
-                df = pd.read_csv(csv_path, encoding="utf-8")
-            except Exception:
-                df = pd.read_csv(csv_path, encoding="utf-8-sig")
-
-        if df is None or df.empty:
-            st.info("Το αρχείο καταγραφών είναι άδειο. Κάνε ένα πρώτο check-in στην καρτέλα «Chat».")
+        st.markdown("### 🪪 Το Χρονολόγιό σου")
+        
+        # Ταξινόμηση ώστε τα πιο πρόσφατα να είναι πάνω
+        if "timestamp" in df_user.columns and not df_user["timestamp"].isna().all():
+            df_user = df_user.sort_values("timestamp", ascending=False).head(60)
         else:
-            # 3) Κανονικοποίηση στηλών 
-            colmap = {c.lower().strip(): c for c in df.columns}
-            def _col(name: str) -> str | None:
-                return colmap.get(name)
+            df_user = df_user.iloc[::-1].head(60)
 
-            if _col("message") is None:
-                if _col("text") is not None:
-                    df.rename(columns={_col("text"): "message"}, inplace=True)
-                elif _col("user_text") is not None:
-                    df.rename(columns={_col("user_text"): "message"}, inplace=True)
-
-            if _col("timestamp") is None:
-                if _col("time") is not None:
-                    df.rename(columns={_col("time"): "timestamp"}, inplace=True)
-                elif _col("date") is not None:
-                    df.rename(columns={_col("date"): "timestamp"}, inplace=True)
-
-            if _col("email") is None and _col("user_email") is not None:
-                df.rename(columns={_col("user_email"): "email"}, inplace=True)
-
-            if "timestamp" in df.columns:
-                df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-
-            current_email = (st.session_state.get("user_email", "") or "").strip().lower()
+        # Ετοιμάζουμε τα δεδομένα για να τα περάσουμε στη Javascript
+        timeline_data = []
+        for _, row in df_user.iterrows():
+            ts = row.get("timestamp", "")
+            if pd.notna(ts) and str(ts).strip():
+                try:
+                    # Μορφοποίηση ημερομηνίας (π.χ. 15 May 2026 • 20:30)
+                    ts_str = pd.to_datetime(ts).strftime("%d %b %Y • %H:%M")
+                except Exception:
+                    ts_str = str(ts)
+            else:
+                ts_str = "-"
+                
+            mood = row.get("mood", 5)
+            sleep = row.get("sleep", 0)
+            water = row.get("water", 0)
+            raw_msg = str(row.get("message", "") or "")
             
-            if "email" in df.columns and current_email:
-                df["email"] = df["email"].astype(str).str.strip().str.lower()
-                df_user = df[df["email"] == current_email].copy()
-            else:
-                df_user = df.copy()
-
-            if df_user.empty:
-                st.warning("Δεν βρέθηκαν εγγραφές για αυτόν τον λογαριασμό.")
-            else:
-                st.markdown("### 🪪 Το Χρονολόγιό σου")
+            # Καθαρισμός HTML tags για ασφάλεια
+            msg_no_tags = re.sub(r"<[^>]+>", "", raw_msg)
+            msg_clean = html.unescape(msg_no_tags).strip()
+            
+            try:
+                mood_val = float(mood)
+            except:
+                mood_val = 5.0
                 
-                # Ταξινόμηση ώστε τα πιο πρόσφατα να είναι πάνω
-                if "timestamp" in df_user.columns and not df_user["timestamp"].isna().all():
-                    df_user = df_user.sort_values("timestamp", ascending=False).head(60)
-                else:
-                    df_user = df_user.iloc[::-1].head(60)
+            # Καθορισμός εικονιδίου/χρώματος βάσει της διάθεσης
+            mood_icon_svg, mood_color = mood_weather_svg(mood_val)
 
-                # Ετοιμάζουμε τα δεδομένα για να τα περάσουμε στη Javascript
-                timeline_data = []
-                for _, row in df_user.iterrows():
-                    ts = row.get("timestamp", "")
-                    if pd.notna(ts) and str(ts).strip():
-                        try:
-                            # Μορφοποίηση ημερομηνίας (π.χ. 15 May 2026 • 20:30)
-                            ts_str = pd.to_datetime(ts).strftime("%d %b %Y • %H:%M")
-                        except Exception:
-                            ts_str = str(ts)
-                    else:
-                        ts_str = "-"
-                        
-                    mood = row.get("mood", 5)
-                    sleep = row.get("sleep", 0)
-                    water = row.get("water", 0)
-                    raw_msg = str(row.get("message", "") or "")
-                    
-                    # Καθαρισμός HTML tags για ασφάλεια
-                    msg_no_tags = re.sub(r"<[^>]+>", "", raw_msg)
-                    msg_clean = html.unescape(msg_no_tags).strip()
-                    
-                    try:
-                        mood_val = float(mood)
-                    except:
-                        mood_val = 5.0
-                        
-                    # Καθορισμός χρωμάτων και emojis βάσει της διάθεσης
-                    if mood_val <= 4:
-                        mood_emoji = "🌧️"
-                        mood_color = "#ff8fa3" # Κόκκινο/Ροζ
-                    elif mood_val <= 7:
-                        mood_emoji = "⛅"
-                        mood_color = "#ffd08a" # Πορτοκαλί/Κίτρινο
-                    else:
-                        mood_emoji = "☀️"
-                        mood_color = "#baf7c3" # Απαλό Πράσινο
-                        
-                    timeline_data.append({
-                        "date": ts_str,
-                        "mood": mood,
-                        "sleep": sleep,
-                        "water": water,
-                        "message": msg_clean,
-                        "emoji": mood_emoji,
-                        "color": mood_color
-                    })
-                    
-                # Μετατροπή της λίστας σε JSON string για να το διαβάσει η JS
-                timeline_json = json.dumps(timeline_data, ensure_ascii=False)
+            timeline_data.append({
+                "date": ts_str,
+                "mood": mood,
+                "sleep": sleep,
+                "water": water,
+                "message": msg_clean,
+                "icon": mood_icon_svg,
+                "color": mood_color
+            })
+            
+        # Μετατροπή της λίστας σε JSON string για να το διαβάσει η JS
+        timeline_json = json.dumps(timeline_data, ensure_ascii=False)
+        
+        # Το υπερ-ρεαλιστικό Timeline 
+        components.html(f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                body {{
+                    margin: 0; padding: 20px 10px; 
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: transparent;
+                }}
+                /* Η κεντρική γραμμή του Timeline */
+                .timeline {{
+                    position: relative;
+                    max-width: 850px;
+                    margin: 0 auto;
+                    padding-left: 50px; /* Χώρος για τη γραμμή και τα εικονίδια */
+                }}
+                .timeline::before {{
+                    content: '';
+                    position: absolute;
+                    left: 19px;
+                    top: 10px;
+                    bottom: 0;
+                    width: 3px;
+                    background: rgba(212, 190, 250, 0.4); /* Λιλά γραμμή */
+                    border-radius: 4px;
+                }}
+                /* Κάθε κάρτα/καταγραφή */
+                .item {{
+                    position: relative;
+                    margin-bottom: 35px;
+                    opacity: 0; /* Αρχικά κρυμμένο για το animation */
+                    transform: translateY(40px);
+                    animation: slideUp 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+                }}
+                @keyframes slideUp {{
+                    to {{ opacity: 1; transform: translateY(0); }}
+                }}
+                /* Το κυκλικό εικονίδιο πάνω στη γραμμή */
+                .icon {{
+                    position: absolute;
+                    left: -53px;
+                    top: 0;
+                    width: 44px;
+                    height: 44px;
+                    border-radius: 50%;
+                    background: rgba(255, 255, 255, 0.8);
+                    backdrop-filter: blur(10px);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    font-size: 20px;
+                    box-shadow: 0 6px 15px rgba(108, 90, 158, 0.12);
+                    z-index: 1;
+                    border: 3px solid; /* Το χρώμα μπαίνει δυναμικά από τη JS */
+                    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+                }}
+                .item:hover .icon {{
+                    transform: scale(1.2) rotate(-10deg);
+                    box-shadow: 0 8px 20px rgba(108, 90, 158, 0.25);
+                }}
+                /* Η γυάλινη κάρτα (Glassmorphism) */
+                .card {{
+                    background: rgba(255, 255, 255, 0.45);
+                    backdrop-filter: blur(24px);
+                    -webkit-backdrop-filter: blur(24px);
+                    border: 1px solid rgba(255, 255, 255, 0.7);
+                    border-radius: 20px;
+                    padding: 22px;
+                    box-shadow: 0 12px 35px rgba(108, 90, 158, 0.05);
+                    transition: all 0.3s ease;
+                }}
+                .item:hover .card {{
+                    transform: translateY(-4px);
+                    box-shadow: 0 18px 45px rgba(108, 90, 158, 0.12);
+                    background: rgba(255, 255, 255, 0.6);
+                }}
+                .header {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 15px;
+                    border-bottom: 1px solid rgba(183, 157, 242, 0.25);
+                    padding-bottom: 10px;
+                }}
+                .date {{
+                    font-weight: 600;
+                    font-size: 14.5px;
+                    color: #73658a;
+                }}
+                .metrics {{
+                    display: flex;
+                    gap: 10px;
+                    flex-wrap: wrap;
+                }}
+                .badge {{
+                    padding: 5px 12px;
+                    border-radius: 20px;
+                    font-size: 12.5px;
+                    font-weight: 600;
+                    color: #4A3D73;
+                    background: rgba(255, 255, 255, 0.6);
+                    border: 1px solid rgba(255, 255, 255, 0.9);
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+                }}
+                .message {{
+                    font-size: 15.5px;
+                    line-height: 1.6;
+                    color: #3b304c;
+                    font-style: italic;
+                    word-wrap: break-word;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="timeline" id="timelineContainer"></div>
+            
+            <script>
+                // Παίρνουμε τα δεδομένα από την Python
+                const data = {timeline_json};
+                const container = document.getElementById('timelineContainer');
                 
-                # Το υπερ-ρεαλιστικό Timeline 
-                components.html(f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600;700&display=swap" rel="stylesheet">
-                    <style>
-                        body {{
-                            margin: 0; padding: 20px 10px; 
-                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                            background: transparent;
-                        }}
-                        /* Η κεντρική γραμμή του Timeline */
-                        .timeline {{
-                            position: relative;
-                            max-width: 850px;
-                            margin: 0 auto;
-                            padding-left: 50px; /* Χώρος για τη γραμμή και τα εικονίδια */
-                        }}
-                        .timeline::before {{
-                            content: '';
-                            position: absolute;
-                            left: 19px;
-                            top: 10px;
-                            bottom: 0;
-                            width: 3px;
-                            background: rgba(212, 190, 250, 0.4); /* Λιλά γραμμή */
-                            border-radius: 4px;
-                        }}
-                        /* Κάθε κάρτα/καταγραφή */
-                        .item {{
-                            position: relative;
-                            margin-bottom: 35px;
-                            opacity: 0; /* Αρχικά κρυμμένο για το animation */
-                            transform: translateY(40px);
-                            animation: slideUp 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-                        }}
-                        @keyframes slideUp {{
-                            to {{ opacity: 1; transform: translateY(0); }}
-                        }}
-                        /* Το κυκλικό εικονίδιο πάνω στη γραμμή */
-                        .icon {{
-                            position: absolute;
-                            left: -53px;
-                            top: 0;
-                            width: 44px;
-                            height: 44px;
-                            border-radius: 50%;
-                            background: rgba(255, 255, 255, 0.8);
-                            backdrop-filter: blur(10px);
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            font-size: 20px;
-                            box-shadow: 0 6px 15px rgba(108, 90, 158, 0.12);
-                            z-index: 1;
-                            border: 3px solid; /* Το χρώμα μπαίνει δυναμικά από τη JS */
-                            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-                        }}
-                        .item:hover .icon {{
-                            transform: scale(1.2) rotate(-10deg);
-                            box-shadow: 0 8px 20px rgba(108, 90, 158, 0.25);
-                        }}
-                        /* Η γυάλινη κάρτα (Glassmorphism) */
-                        .card {{
-                            background: rgba(255, 255, 255, 0.45);
-                            backdrop-filter: blur(24px);
-                            -webkit-backdrop-filter: blur(24px);
-                            border: 1px solid rgba(255, 255, 255, 0.7);
-                            border-radius: 20px;
-                            padding: 22px;
-                            box-shadow: 0 12px 35px rgba(108, 90, 158, 0.05);
-                            transition: all 0.3s ease;
-                        }}
-                        .item:hover .card {{
-                            transform: translateY(-4px);
-                            box-shadow: 0 18px 45px rgba(108, 90, 158, 0.12);
-                            background: rgba(255, 255, 255, 0.6);
-                        }}
-                        .header {{
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                            margin-bottom: 15px;
-                            border-bottom: 1px solid rgba(183, 157, 242, 0.25);
-                            padding-bottom: 10px;
-                        }}
-                        .date {{
-                            font-weight: 600;
-                            font-size: 14.5px;
-                            color: #73658a;
-                        }}
-                        .metrics {{
-                            display: flex;
-                            gap: 10px;
-                            flex-wrap: wrap;
-                        }}
-                        .badge {{
-                            padding: 5px 12px;
-                            border-radius: 20px;
-                            font-size: 12.5px;
-                            font-weight: 600;
-                            color: #4A3D73;
-                            background: rgba(255, 255, 255, 0.6);
-                            border: 1px solid rgba(255, 255, 255, 0.9);
-                            box-shadow: 0 2px 8px rgba(0,0,0,0.02);
-                        }}
-                        .message {{
-                            font-size: 15.5px;
-                            line-height: 1.6;
-                            color: #3b304c;
-                            font-style: italic;
-                            word-wrap: break-word;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="timeline" id="timelineContainer"></div>
+                data.forEach((entry, index) => {{
+                    // Staggered Animation: Κάθε κάρτα εμφανίζεται με διαφορά 0.15s
+                    const delay = index * 0.15;
                     
-                    <script>
-                        // Παίρνουμε τα δεδομένα από την Python
-                        const data = {timeline_json};
-                        const container = document.getElementById('timelineContainer');
-                        
-                        data.forEach((entry, index) => {{
-                            // Staggered Animation: Κάθε κάρτα εμφανίζεται με διαφορά 0.15s
-                            const delay = index * 0.15;
-                            
-                            const item = document.createElement('div');
-                            item.className = 'item';
-                            item.style.animationDelay = `${{delay}}s`;
-                            
-                            item.innerHTML = `
-                                <div class="icon" style="border-color: ${{entry.color}};">
-                                    ${{entry.emoji}}
+                    const item = document.createElement('div');
+                    item.className = 'item';
+                    item.style.animationDelay = `${{delay}}s`;
+                    
+                    item.innerHTML = `
+                        <div class="icon" style="border-color: ${{entry.color}};">
+                            ${{entry.icon}}
+                        </div>
+                        <div class="card">
+                            <div class="header">
+                                <div class="date">📅 ${{entry.date}}</div>
+                                <div class="metrics">
+                                    <span class="badge">🧠 Διάθεση: ${{entry.mood}}/10</span>
+                                    <span class="badge">😴 Ύπνος: ${{entry.sleep}}h</span>
+                                    <span class="badge">💧 Νερό: ${{entry.water}}</span>
                                 </div>
-                                <div class="card">
-                                    <div class="header">
-                                        <div class="date">📅 ${{entry.date}}</div>
-                                        <div class="metrics">
-                                            <span class="badge">🧠 Διάθεση: ${{entry.mood}}/10</span>
-                                            <span class="badge">😴 Ύπνος: ${{entry.sleep}}h</span>
-                                            <span class="badge">💧 Νερό: ${{entry.water}}</span>
-                                        </div>
-                                    </div>
-                                    <div class="message">«${{entry.message}}»</div>
-                                </div>
-                            `;
-                            container.appendChild(item);
-                        }});
-                    </script>
-                </body>
-                </html>
-                """, height=750, scrolling=True)
-
-
+                            </div>
+                            <div class="message">«${{entry.message}}»</div>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                }});
+            </script>
+        </body>
+        </html>
+        """, height=750, scrolling=True)
 
 
 # ============================================================
@@ -2149,263 +1328,302 @@ with tab_stats:
         unsafe_allow_html=True,
     )
 
-    csv_path = os.path.join(os.path.dirname(__file__), "..", "user_data.csv")
+    df = load_checkins_df()
 
-    if not os.path.exists(csv_path):
-        st.info("Δεν βρέθηκε ακόμη αρχείο καταγραφών. Κάνε πρώτα μερικά check-ins στην καρτέλα «Chat».")
+    if df.empty:
+        st.info("Δεν βρέθηκε ακόμη καταγραφή. Κάνε πρώτα ένα check-in στην καρτέλα «Chat».")
     else:
-        df = pd.read_csv(csv_path)
-        if df.empty:
-            st.info("Το αρχείο καταγραφών είναι άδειο. Κάνε ένα πρώτο check-in στην καρτέλα «Chat».")
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+
+        # --- STREAK: υπολογίζεται πάντα στο ΠΛΗΡΕΣ ιστορικό,
+        # ανεξάρτητα από το χρονικό παράθυρο που θα διαλέξει
+        # ο χρήστης παρακάτω για τα γραφήματα.
+        all_dates = df["timestamp"].dropna().tolist() if "timestamp" in df.columns else []
+        current_streak = compute_current_streak(all_dates)
+
+        st.markdown(
+            f"""
+            <div class="stats-card" style="background: linear-gradient(135deg, rgba(232,145,107,0.22), rgba(232,145,107,0.08)) !important; display:flex; flex-direction:row; align-items:center; gap:12px; animation: cardFadeIn 0.3s ease-out;">
+              {streak_flame_svg()}
+              <div>
+                <div class="stats-card-main" style="margin-bottom:0;">{current_streak} {"μέρα" if current_streak == 1 else "μέρες"}</div>
+                <div class="stats-card-sub">Συνεχόμενο streak check-ins</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # --- Εξαγωγή σε PDF (για να μοιραστεί κανείς με πραγματικό ειδικό) ---
+        col_pdf1, col_pdf2 = st.columns([2, 1])
+        with col_pdf2:
+            if st.button("📄 Δημιουργία PDF", key="btn_gen_pdf", use_container_width=True):
+                screening_for_pdf = load_screening_history(limit=10)
+                pdf_bytes = generate_wellness_pdf(
+                    user_name=st.session_state.get("user_name", ""),
+                    df_user=df,
+                    current_streak=current_streak,
+                    screening_history=screening_for_pdf,
+                )
+                st.session_state["_pdf_export_bytes"] = pdf_bytes
+
+            if st.session_state.get("_pdf_export_bytes"):
+                st.download_button(
+                    "⬇️ Λήψη PDF",
+                    data=st.session_state["_pdf_export_bytes"],
+                    file_name=f"project_wellness_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    key="btn_download_pdf",
+                    use_container_width=True,
+                )
+
+        # --- Επιλογή χρονικού παραθύρου για τα παρακάτω γραφήματα ---
+        window_label = st.radio(
+            "Χρονικό παράθυρο γραφημάτων",
+            ["Τελευταίες 15", "Τελευταίες 30", "Τελευταίες 90"],
+            horizontal=True,
+            key="stats_window",
+            label_visibility="collapsed",
+        )
+        window_n = {"Τελευταίες 15": 15, "Τελευταίες 30": 30, "Τελευταίες 90": 90}[window_label]
+
+
+        df_last = df.tail(window_n).copy()
+
+        for col in ["mood", "sleep", "water"]:
+            df_last[col] = pd.to_numeric(df_last[col], errors="coerce").fillna(0)
+
+        avg_mood = df_last["mood"].mean()
+        avg_sleep = df_last["sleep"].mean()
+        avg_water = df_last["water"].mean()
+
+        last_row = df_last.iloc[-1]
+        last_mood = float(last_row.get("mood", 0) or 0)
+        last_sleep = float(last_row.get("sleep", 0) or 0)
+        last_water = float(last_row.get("water", 0) or 0)
+
+        # --- 1. ΚΑΡΤΕΣ ΣΥΝΟΨΗΣ ΣΤΗΝ ΚΟΡΥΦΗ ---
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.markdown(
+                f"""
+                <div class="stats-card stats-card-mood" style="animation: cardFadeIn 0.4s ease-out;">
+                  <div class="stats-card-label">Διάθεση</div>
+                  <div class="stats-card-main">{last_mood:.1f}/10</div>
+                  <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_mood:.1f}</div>
+                </div>
+                """, unsafe_allow_html=True
+            )
+        with col_b:
+            st.markdown(
+                f"""
+                <div class="stats-card stats-card-sleep" style="animation: cardFadeIn 0.6s ease-out;">
+                  <div class="stats-card-label">Ύπνος</div>
+                  <div class="stats-card-main">{last_sleep:.1f}h</div>
+                  <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_sleep:.1f}h</div>
+                </div>
+                """, unsafe_allow_html=True
+            )
+        with col_c:
+            st.markdown(
+                f"""
+                <div class="stats-card stats-card-water" style="animation: cardFadeIn 0.8s ease-out;">
+                  <div class="stats-card-label">Νερό</div>
+                  <div class="stats-card-main">{last_water:.0f} ποτ.</div>
+                  <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_water:.1f}</div>
+                </div>
+                """, unsafe_allow_html=True
+            )
+
+        # --- 2. ΠΡΟΕΤΟΙΜΑΣΙΑ ΔΕΔΟΜΕΝΩΝ ΓΙΑ ΤΗ JAVASCRIPT ---
+        if "timestamp" not in df_last.columns or df_last["timestamp"].isna().all():
+            st.info("Δεν υπάρχουν έγκυρες ημερομηνίες για να φτιάξω τα διαγράμματα.")
         else:
-            if "timestamp" in df.columns:
-                df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+            df_last = df_last.dropna(subset=["timestamp"])
+            
+            # Μετατροπή ημερομηνιών σε μικρή μορφή (π.χ. "15/05")
+            dates_list = df_last["timestamp"].dt.strftime("%d/%m").tolist()
+            mood_list = df_last["mood"].tolist()
+            sleep_list = df_last["sleep"].tolist()
+            water_list = df_last["water"].tolist()
 
-            current_email = st.session_state.get("user_email", "")
-            if "email" in df.columns and current_email:
-                df = df[df["email"].astype(str).str.lower().str.strip() == current_email.strip().lower()]
+            dates_json = json.dumps(dates_list)
+            mood_json = json.dumps(mood_list)
+            sleep_json = json.dumps(sleep_list)
+            water_json = json.dumps(water_list)
 
-            if df.empty:
-                st.info("Δεν βρέθηκαν καταγραφές για αυτόν τον λογαριασμό. Δοκίμασε ένα νέο check-in.")
-            else:
-                if "timestamp" in df.columns:
-                    df = df.sort_values("timestamp")
-
-                df_last = df.tail(15).copy() # Μεγαλυτερη διαφανεια
-
-                for col in ["mood", "sleep", "water"]:
-                    df_last[col] = pd.to_numeric(df_last[col], errors="coerce").fillna(0)
-
-                avg_mood = df_last["mood"].mean()
-                avg_sleep = df_last["sleep"].mean()
-                avg_water = df_last["water"].mean()
-
-                last_row = df_last.iloc[-1]
-                last_mood = float(last_row.get("mood", 0) or 0)
-                last_sleep = float(last_row.get("sleep", 0) or 0)
-                last_water = float(last_row.get("water", 0) or 0)
-
-                # --- 1. ΚΑΡΤΕΣ ΣΥΝΟΨΗΣ ΣΤΗΝ ΚΟΡΥΦΗ ---
-                col_a, col_b, col_c = st.columns(3)
-                with col_a:
-                    st.markdown(
-                        f"""
-                        <div class="stats-card stats-card-mood" style="animation: cardFadeIn 0.4s ease-out;">
-                          <div class="stats-card-label">Διάθεση</div>
-                          <div class="stats-card-main">{last_mood:.1f}/10</div>
-                          <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_mood:.1f}</div>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-                with col_b:
-                    st.markdown(
-                        f"""
-                        <div class="stats-card stats-card-sleep" style="animation: cardFadeIn 0.6s ease-out;">
-                          <div class="stats-card-label">Ύπνος</div>
-                          <div class="stats-card-main">{last_sleep:.1f}h</div>
-                          <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_sleep:.1f}h</div>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-                with col_c:
-                    st.markdown(
-                        f"""
-                        <div class="stats-card stats-card-water" style="animation: cardFadeIn 0.8s ease-out;">
-                          <div class="stats-card-label">Νερό</div>
-                          <div class="stats-card-main">{last_water:.0f} ποτ.</div>
-                          <div class="stats-card-sub">Μ.Ο. περιόδου: {avg_water:.1f}</div>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-
-                # --- 2. ΠΡΟΕΤΟΙΜΑΣΙΑ ΔΕΔΟΜΕΝΩΝ ΓΙΑ ΤΗ JAVASCRIPT ---
-                if "timestamp" not in df_last.columns or df_last["timestamp"].isna().all():
-                    st.info("Δεν υπάρχουν έγκυρες ημερομηνίες για να φτιάξω τα διαγράμματα.")
-                else:
-                    df_last = df_last.dropna(subset=["timestamp"])
+            # --- 3. JAVASCRIPT & CHART.JS ΟΠΤΙΚΟΠΟΙΗΣΗ ---
+            components.html(f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+                <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
+                <style>
+                    body {{
+                        margin: 0; padding: 10px;
+                        font-family: 'Manrope', system-ui, sans-serif;
+                        background: transparent;
+                    }}
+                    .chart-container {{
+                        background: rgba(255, 255, 255, 0.45);
+                        backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+                        border: 1px solid rgba(255, 255, 255, 0.7);
+                        border-radius: 20px;
+                        padding: 20px;
+                        margin-bottom: 25px;
+                        box-shadow: 0 10px 30px rgba(108, 90, 158, 0.08);
+                        transition: transform 0.3s ease;
+                        opacity: 0;
+                        transform: translateY(20px);
+                        animation: fadeInUp 0.8s ease-out forwards;
+                    }}
+                    .chart-container:hover {{
+                        transform: translateY(-4px);
+                        box-shadow: 0 15px 40px rgba(108, 90, 158, 0.15);
+                        background: rgba(255, 255, 255, 0.6);
+                    }}
+                    .chart-title {{
+                        color: #4A3D73; font-weight: 600; font-size: 16px; 
+                        margin-bottom: 15px; margin-top: 0; display: flex; align-items: center; gap: 8px;
+                    }}
+                    /* Staggered animation delays */
+                    #c1 {{ animation-delay: 0.1s; }}
+                    #c2 {{ animation-delay: 0.3s; }}
+                    #c3 {{ animation-delay: 0.5s; }}
                     
-                    # Μετατροπή ημερομηνιών σε μικρή μορφή (π.χ. "15/05")
-                    dates_list = df_last["timestamp"].dt.strftime("%d/%m").tolist()
-                    mood_list = df_last["mood"].tolist()
-                    sleep_list = df_last["sleep"].tolist()
-                    water_list = df_last["water"].tolist()
+                    @keyframes fadeInUp {{
+                        to {{ opacity: 1; transform: translateY(0); }}
+                    }}
+                    
+                    /* Container για τα canvas ώστε να είναι responsive */
+                    .canvas-wrapper {{ position: relative; height: 220px; width: 100%; }}
+                </style>
+            </head>
+            <body>
 
-                    dates_json = json.dumps(dates_list)
-                    mood_json = json.dumps(mood_list)
-                    sleep_json = json.dumps(sleep_list)
-                    water_json = json.dumps(water_list)
+                <div class="chart-container" id="c1">
+                    <h3 class="chart-title">🧠 Διακυμάνσεις Διάθεσης</h3>
+                    <div class="canvas-wrapper"><canvas id="moodChart"></canvas></div>
+                </div>
 
-                    # --- 3. JAVASCRIPT & CHART.JS ΟΠΤΙΚΟΠΟΙΗΣΗ ---
-                    components.html(f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-                        <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600&display=swap" rel="stylesheet">
-                        <style>
-                            body {{
-                                margin: 0; padding: 10px;
-                                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                                background: transparent;
+                <div class="chart-container" id="c2">
+                    <h3 class="chart-title">😴 Ποιότητα Ύπνου (Ώρες)</h3>
+                    <div class="canvas-wrapper"><canvas id="sleepChart"></canvas></div>
+                </div>
+
+                <div class="chart-container" id="c3">
+                    <h3 class="chart-title">💧 Ενυδάτωση (Ποτήρια)</h3>
+                    <div class="canvas-wrapper"><canvas id="waterChart"></canvas></div>
+                </div>
+
+                <script>
+                    // Κοινές ρυθμίσεις για γραμματοσειρές και στυλ αξόνων
+                    Chart.defaults.font.family = "'Segoe UI', Tahoma, sans-serif";
+                    Chart.defaults.color = '#73658a';
+                    Chart.defaults.scale.grid.color = 'rgba(183, 157, 242, 0.15)';
+                    
+                    const commonOptions = {{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {{
+                            legend: {{ display: false }},
+                            tooltip: {{
+                                backgroundColor: 'rgba(74, 61, 115, 0.9)',
+                                titleFont: {{ size: 13 }},
+                                bodyFont: {{ size: 14, weight: 'bold' }},
+                                padding: 12,
+                                cornerRadius: 8,
+                                displayColors: false
                             }}
-                            .chart-container {{
-                                background: rgba(255, 255, 255, 0.45);
-                                backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-                                border: 1px solid rgba(255, 255, 255, 0.7);
-                                border-radius: 20px;
-                                padding: 20px;
-                                margin-bottom: 25px;
-                                box-shadow: 0 10px 30px rgba(108, 90, 158, 0.08);
-                                transition: transform 0.3s ease;
-                                opacity: 0;
-                                transform: translateY(20px);
-                                animation: fadeInUp 0.8s ease-out forwards;
-                            }}
-                            .chart-container:hover {{
-                                transform: translateY(-4px);
-                                box-shadow: 0 15px 40px rgba(108, 90, 158, 0.15);
-                                background: rgba(255, 255, 255, 0.6);
-                            }}
-                            .chart-title {{
-                                color: #4A3D73; font-weight: 600; font-size: 16px; 
-                                margin-bottom: 15px; margin-top: 0; display: flex; align-items: center; gap: 8px;
-                            }}
-                            /* Staggered animation delays */
-                            #c1 {{ animation-delay: 0.1s; }}
-                            #c2 {{ animation-delay: 0.3s; }}
-                            #c3 {{ animation-delay: 0.5s; }}
-                            
-                            @keyframes fadeInUp {{
-                                to {{ opacity: 1; transform: translateY(0); }}
-                            }}
-                            
-                            /* Container για τα canvas ώστε να είναι responsive */
-                            .canvas-wrapper {{ position: relative; height: 220px; width: 100%; }}
-                        </style>
-                    </head>
-                    <body>
+                        }},
+                        scales: {{
+                            x: {{ grid: {{ display: false }} }},
+                            y: {{ beginAtZero: true, border: {{ display: false }} }}
+                        }},
+                        interaction: {{ mode: 'index', intersect: false }},
+                        elements: {{
+                            line: {{ tension: 0.4 }}, // 0.4 δίνει την απαλή καμπύλη (spline)
+                            point: {{ radius: 4, hoverRadius: 7, borderWidth: 2 }}
+                        }}
+                    }};
 
-                        <div class="chart-container" id="c1">
-                            <h3 class="chart-title">🧠 Διακυμάνσεις Διάθεσης</h3>
-                            <div class="canvas-wrapper"><canvas id="moodChart"></canvas></div>
-                        </div>
+                    // Δεδομένα από Python
+                    const labels = {dates_json};
 
-                        <div class="chart-container" id="c2">
-                            <h3 class="chart-title">😴 Ποιότητα Ύπνου (Ώρες)</h3>
-                            <div class="canvas-wrapper"><canvas id="sleepChart"></canvas></div>
-                        </div>
+                    // --- 1. ΔΙΑΓΡΑΜΜΑ ΔΙΑΘΕΣΗΣ ---
+                    const ctxMood = document.getElementById('moodChart').getContext('2d');
+                    let gradientMood = ctxMood.createLinearGradient(0, 0, 0, 220);
+                    gradientMood.addColorStop(0, 'rgba(242, 166, 184, 0.6)'); // twilight-rose
+                    gradientMood.addColorStop(1, 'rgba(242, 166, 184, 0.0)');
+                    
+                    new Chart(ctxMood, {{
+                        type: 'line',
+                        data: {{
+                            labels: labels,
+                            datasets: [{{
+                                label: 'Διάθεση (1-10)',
+                                data: {mood_json},
+                                borderColor: '#F2A6B8',
+                                backgroundColor: gradientMood,
+                                pointBackgroundColor: '#ffffff',
+                                pointBorderColor: '#F2A6B8',
+                                fill: true,
+                            }}]
+                        }},
+                        options: {{ ...commonOptions, scales: {{ y: {{ max: 10, min: 0 }} }} }}
+                    }});
 
-                        <div class="chart-container" id="c3">
-                            <h3 class="chart-title">💧 Ενυδάτωση (Ποτήρια)</h3>
-                            <div class="canvas-wrapper"><canvas id="waterChart"></canvas></div>
-                        </div>
+                    // --- 2. ΔΙΑΓΡΑΜΜΑ ΥΠΝΟΥ ---
+                    const ctxSleep = document.getElementById('sleepChart').getContext('2d');
+                    let gradientSleep = ctxSleep.createLinearGradient(0, 0, 0, 220);
+                    gradientSleep.addColorStop(0, 'rgba(183, 157, 242, 0.6)'); // twilight-lilac
+                    gradientSleep.addColorStop(1, 'rgba(183, 157, 242, 0.0)');
 
-                        <script>
-                            // Κοινές ρυθμίσεις για γραμματοσειρές και στυλ αξόνων
-                            Chart.defaults.font.family = "'Segoe UI', Tahoma, sans-serif";
-                            Chart.defaults.color = '#73658a';
-                            Chart.defaults.scale.grid.color = 'rgba(183, 157, 242, 0.15)';
-                            
-                            const commonOptions = {{
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: {{
-                                    legend: {{ display: false }},
-                                    tooltip: {{
-                                        backgroundColor: 'rgba(74, 61, 115, 0.9)',
-                                        titleFont: {{ size: 13 }},
-                                        bodyFont: {{ size: 14, weight: 'bold' }},
-                                        padding: 12,
-                                        cornerRadius: 8,
-                                        displayColors: false
-                                    }}
-                                }},
-                                scales: {{
-                                    x: {{ grid: {{ display: false }} }},
-                                    y: {{ beginAtZero: true, border: {{ display: false }} }}
-                                }},
-                                interaction: {{ mode: 'index', intersect: false }},
-                                elements: {{
-                                    line: {{ tension: 0.4 }}, // 0.4 δίνει την απαλή καμπύλη (spline)
-                                    point: {{ radius: 4, hoverRadius: 7, borderWidth: 2 }}
-                                }}
-                            }};
+                    new Chart(ctxSleep, {{
+                        type: 'line',
+                        data: {{
+                            labels: labels,
+                            datasets: [{{
+                                label: 'Ώρες Ύπνου',
+                                data: {sleep_json},
+                                borderColor: '#B79DF2',
+                                backgroundColor: gradientSleep,
+                                pointBackgroundColor: '#ffffff',
+                                pointBorderColor: '#B79DF2',
+                                fill: true,
+                            }}]
+                        }},
+                        options: commonOptions
+                    }});
 
-                            // Δεδομένα από Python
-                            const labels = {dates_json};
+                    // --- 3. ΔΙΑΓΡΑΜΜΑ ΝΕΡΟΥ ---
+                    const ctxWater = document.getElementById('waterChart').getContext('2d');
+                    let gradientWater = ctxWater.createLinearGradient(0, 0, 0, 220);
+                    gradientWater.addColorStop(0, 'rgba(143, 175, 140, 0.6)'); // twilight-sage
+                    gradientWater.addColorStop(1, 'rgba(143, 175, 140, 0.0)');
 
-                            // --- 1. ΔΙΑΓΡΑΜΜΑ ΔΙΑΘΕΣΗΣ ---
-                            const ctxMood = document.getElementById('moodChart').getContext('2d');
-                            let gradientMood = ctxMood.createLinearGradient(0, 0, 0, 220);
-                            gradientMood.addColorStop(0, 'rgba(255, 143, 163, 0.6)'); // Ροζ απαλό
-                            gradientMood.addColorStop(1, 'rgba(255, 143, 163, 0.0)');
-                            
-                            new Chart(ctxMood, {{
-                                type: 'line',
-                                data: {{
-                                    labels: labels,
-                                    datasets: [{{
-                                        label: 'Διάθεση (1-10)',
-                                        data: {mood_json},
-                                        borderColor: '#ff758f',
-                                        backgroundColor: gradientMood,
-                                        pointBackgroundColor: '#ffffff',
-                                        pointBorderColor: '#ff758f',
-                                        fill: true,
-                                    }}]
-                                }},
-                                options: {{ ...commonOptions, scales: {{ y: {{ max: 10, min: 0 }} }} }}
-                            }});
-
-                            // --- 2. ΔΙΑΓΡΑΜΜΑ ΥΠΝΟΥ ---
-                            const ctxSleep = document.getElementById('sleepChart').getContext('2d');
-                            let gradientSleep = ctxSleep.createLinearGradient(0, 0, 0, 220);
-                            gradientSleep.addColorStop(0, 'rgba(183, 157, 242, 0.6)'); // Λιλά
-                            gradientSleep.addColorStop(1, 'rgba(183, 157, 242, 0.0)');
-
-                            new Chart(ctxSleep, {{
-                                type: 'line',
-                                data: {{
-                                    labels: labels,
-                                    datasets: [{{
-                                        label: 'Ώρες Ύπνου',
-                                        data: {sleep_json},
-                                        borderColor: '#9d7bea',
-                                        backgroundColor: gradientSleep,
-                                        pointBackgroundColor: '#ffffff',
-                                        pointBorderColor: '#9d7bea',
-                                        fill: true,
-                                    }}]
-                                }},
-                                options: commonOptions
-                            }});
-
-                            // --- 3. ΔΙΑΓΡΑΜΜΑ ΝΕΡΟΥ ---
-                            const ctxWater = document.getElementById('waterChart').getContext('2d');
-                            let gradientWater = ctxWater.createLinearGradient(0, 0, 0, 220);
-                            gradientWater.addColorStop(0, 'rgba(137, 207, 240, 0.6)'); // Γαλάζιο/Κυανό
-                            gradientWater.addColorStop(1, 'rgba(137, 207, 240, 0.0)');
-
-                            new Chart(ctxWater, {{
-                                type: 'line',
-                                data: {{
-                                    labels: labels,
-                                    datasets: [{{
-                                        label: 'Ποτήρια Νερό',
-                                        data: {water_json},
-                                        borderColor: '#5bc0eb',
-                                        backgroundColor: gradientWater,
-                                        pointBackgroundColor: '#ffffff',
-                                        pointBorderColor: '#5bc0eb',
-                                        fill: true,
-                                    }}]
-                                }},
-                                options: commonOptions
-                            }});
-                        </script>
-                    </body>
-                    </html>
-                    """, height=900, scrolling=True)
+                    new Chart(ctxWater, {{
+                        type: 'line',
+                        data: {{
+                            labels: labels,
+                            datasets: [{{
+                                label: 'Ποτήρια Νερό',
+                                data: {water_json},
+                                borderColor: '#8FAF8C',
+                                backgroundColor: gradientWater,
+                                pointBackgroundColor: '#ffffff',
+                                pointBorderColor: '#8FAF8C',
+                                fill: true,
+                            }}]
+                        }},
+                        options: commonOptions
+                    }});
+                </script>
+            </body>
+            </html>
+            """, height=900, scrolling=True)
 
 
 # ============================================================
@@ -3174,6 +2392,142 @@ with tab_ex:
 
 
 # ============================================================
+# ΑΞΙΟΛΟΓΗΣΗ TAB (PHQ-9 / GAD-7)
+# ============================================================
+
+with tab_screening:
+    st.markdown(
+        """
+        <div class="page-header">
+          <h1 class='page-title'>🩺 Αξιολόγηση</h1>
+          <p class='page-subtitle'>
+            Δύο σύντομα, επιστημονικά επικυρωμένα ερωτηματολόγια αυτο-αναφοράς
+            (PHQ-9 για κατάθλιψη, GAD-7 για άγχος). Δεν αποτελούν διάγνωση —
+            είναι μια δομημένη ένδειξη που μπορεί να σε βοηθήσει να καταλάβεις
+            καλύτερα πώς νιώθεις τις τελευταίες 2 εβδομάδες.
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div class='main-wrapper'>", unsafe_allow_html=True)
+
+    screening_choice = st.radio(
+        "Ποιο θέλεις να συμπληρώσεις;",
+        ["Κατάθλιψη (PHQ-9)", "Άγχος (GAD-7)"],
+        horizontal=True,
+        key="screening_choice",
+    )
+
+    st.markdown("---")
+    st.markdown(f"**{SCREENING_INTRO}**")
+    st.caption(
+        "Απάντησε όσο πιο ειλικρινά μπορείς — δεν υπάρχουν σωστές/λάθος απαντήσεις."
+    )
+
+    answer_labels = [label for _, label in ANSWER_OPTIONS]
+
+    if screening_choice == "Κατάθλιψη (PHQ-9)":
+        phq9_answers: list[int] = []
+        for i, q in enumerate(PHQ9_QUESTIONS):
+            chosen_label = st.radio(
+                f"{i + 1}. {q}",
+                options=answer_labels,
+                key=f"phq9_q{i}",
+                horizontal=True,
+            )
+            score_val = next(v for v, label in ANSWER_OPTIONS if label == chosen_label)
+            phq9_answers.append(score_val)
+
+        if st.button("Υποβολή PHQ-9 ✨", key="submit_phq9"):
+            total, severity_label, flagged = score_phq9(phq9_answers)
+
+            # ΚΡΙΣΙΜΟ: η ερώτηση αυτοτραυματισμού ΠΟΤΕ δεν αντιμετωπίζεται
+            # απλά ως "πόντοι" -- ενεργοποιεί άμεσα το ίδιο emergency
+            # protocol που έχει ήδη η εφαρμογή στο Chat tab.
+            if flagged:
+                emergency_html = emergency_message()
+                st.session_state.messages.append(("emergency", emergency_html))
+                render_emergency_block(emergency_html)
+
+                log_checkin(None, None, None, "PHQ-9 item 9 flagged", is_emergency=True)
+
+            save_screening_result("phq9", total, severity_label, phq9_answers, flagged_item9=flagged)
+
+            st.markdown(
+                f"""
+                <div class="reframe-card">
+                  <div class="reframe-new-title">Αποτέλεσμα PHQ-9</div>
+                  <div class="reframe-new-body"><strong>Σκορ: {total}/27</strong> — {severity_label}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if not flagged:
+                st.info(
+                    "Αυτό είναι ένα εργαλείο screening, όχι διάγνωση. Αν σε ανησυχεί το "
+                    "αποτέλεσμα, μια συζήτηση με ψυχολόγο ή ψυχίατρο είναι καλή ιδέα."
+                )
+
+    else:
+        gad7_answers: list[int] = []
+        for i, q in enumerate(GAD7_QUESTIONS):
+            chosen_label = st.radio(
+                f"{i + 1}. {q}",
+                options=answer_labels,
+                key=f"gad7_q{i}",
+                horizontal=True,
+            )
+            score_val = next(v for v, label in ANSWER_OPTIONS if label == chosen_label)
+            gad7_answers.append(score_val)
+
+        if st.button("Υποβολή GAD-7 ✨", key="submit_gad7"):
+            total, severity_label = score_gad7(gad7_answers)
+            save_screening_result("gad7", total, severity_label, gad7_answers, flagged_item9=False)
+
+            st.markdown(
+                f"""
+                <div class="reframe-card">
+                  <div class="reframe-new-title">Αποτέλεσμα GAD-7</div>
+                  <div class="reframe-new-body"><strong>Σκορ: {total}/21</strong> — {severity_label}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.info(
+                "Αυτό είναι ένα εργαλείο screening, όχι διάγνωση. Αν σε ανησυχεί το "
+                "αποτέλεσμα, μια συζήτηση με ψυχολόγο ή ψυχίατρο είναι καλή ιδέα."
+            )
+
+    st.markdown("---")
+    st.markdown("### 📈 Ιστορικό αξιολογήσεων")
+    screening_history = load_screening_history(limit=10)
+    if screening_history:
+        for h in screening_history:
+            ts = (h.get("created_at") or "")[:16].replace("T", " ")
+            type_label = "PHQ-9 (κατάθλιψη)" if h.get("screening_type") == "phq9" else "GAD-7 (άγχος)"
+            st.markdown(
+                f"- **{type_label}** — {h.get('total_score')} · {h.get('severity_label')} · {ts}"
+            )
+    else:
+        st.caption("Δεν υπάρχουν ακόμη καταγραφές αξιολόγησης.")
+
+    st.markdown(
+        """
+        <p class="footer-disclaimer">
+          Τα PHQ-9 και GAD-7 είναι δημόσια διαθέσιμα εργαλεία screening, ευρέως
+          χρησιμοποιούμενα στην κλινική πράξη. Δεν αντικαθιστούν κλινική αξιολόγηση
+          από ειδικό. Αν βρίσκεσαι σε κίνδυνο, κάλεσε το 112 ή τη Γραμμή Παρέμβασης 1018.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ============================================================
 # THOUGHT REFRAME STUDIO TAB
 # ============================================================
 
@@ -3244,7 +2598,15 @@ with tab_reframe:
         if not (thought_input or "").strip():
             st.warning("Γράψε πρώτα τη σκέψη που σε δυσκολεύει 📝")
         else:
-            reframed = generate_reframe(thought_input, pattern)
+            with st.spinner("Ψάχνω σχετικές τεχνικές και συνθέτω μια απάντηση..."):
+                reframe_profile = load_profile()
+                reframed, used_techniques, used_personal = generate_reframe_rag(
+                    thought=thought_input,
+                    pattern=pattern,
+                    intensity=intensity,
+                    profile=reframe_profile,
+                )
+
             full_reframe = (
                 f"Βλέπω ότι αυτή η σκέψη σε βαραίνει περίπου **{intensity}/10** αυτή τη στιγμή.\n\n"
                 + reframed
@@ -3278,6 +2640,19 @@ with tab_reframe:
                 f"<div class='reframe-new-body'>{full_reframe}</div></div>",
                 unsafe_allow_html=True,
             )
+
+            if used_techniques or used_personal:
+                with st.expander("🔎 Πηγές που χρησιμοποιήθηκαν (RAG)"):
+                    if used_techniques:
+                        st.markdown("**Σχετικές τεχνικές από τη βιβλιοθήκη γνώσης:**")
+                        for t in used_techniques:
+                            sim = t.get("similarity", 0)
+                            st.markdown(f"- _{t.get('content','')}_  (ομοιότητα: {sim:.2f})")
+                    if used_personal:
+                        st.markdown("**Σχετικές προηγούμενες σκέψεις σου:**")
+                        for p in used_personal:
+                            sim = p.get("similarity", 0)
+                            st.markdown(f"- «{p.get('thought','')}» (ομοιότητα: {sim:.2f})")
 
     if st.session_state.reframes_history:
         st.markdown("---")
@@ -3382,6 +2757,10 @@ with tab_profile:
                 "soothing_things": soothing_things,
             }
             save_profile(new_profile)
+
+            # Συγχρονίζουμε και το όνομα στην κορυφή/sidebar
+            if name.strip():
+                st.session_state.user_name = name.strip()
 
             st.toast("✨ Το προφίλ ενημερώθηκε!", icon="✅")
 
@@ -3623,7 +3002,8 @@ with tab_info:
             f"""<div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; padding: 25px; height: 100%; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08); animation: cardFadeIn 0.5s ease-out;">
 <h3 style="color: #4A3D73; font-size: 1.2rem; margin-top: 0; display: flex; align-items: center; gap: 8px;">🔒 Απόρρητο Δεδομένων</h3>
 <p style="color: #73658a; line-height: 1.6; font-size: 0.95rem;">
-Το ιστορικό σου αποθηκεύεται <strong>με απόλυτη ασφάλεια</strong> στην cloud βάση δεδομένων της εφαρμογής (Supabase), ώστε να μπορείς να συνδέεσαι από παντού χωρίς να χάνεις την πρόοδό σου. 
+Η είσοδος στην εφαρμογή γίνεται πλέον με <strong>πραγματικό λογαριασμό</strong> (email + κωδικός), μέσω της υπηρεσίας 
+Supabase Auth, και το ιστορικό σου προστατεύεται με πολιτικές Row Level Security ώστε να το βλέπεις μόνο εσύ. 
 Τα δεδομένα που στέλνονται στο API του OpenAI είναι κρυπτογραφημένα και <strong>δεν</strong> χρησιμοποιούνται για την εκπαίδευση μελλοντικών μοντέλων τους.
 </p>
 </div>""", 
