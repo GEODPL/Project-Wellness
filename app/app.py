@@ -436,22 +436,33 @@ if not st.session_state.logged_in:
                     if err:
                         st.error(f"⚠️ Αποτυχία εγγραφής: {err}")
                     elif res and res.user:
-                        st.session_state.logged_in = True
-                        st.session_state.user_id = res.user.id
-                        st.session_state.user_email = res.user.email
-                        st.session_state.user_name = name
+                        # Αν το "Confirm email" είναι ενεργό στη Supabase, η εγγραφή
+                        # δημιουργεί τον χρήστη αλλά ΔΕΝ δίνει ενεργό session μέχρι
+                        # να πατήσει το link επιβεβαίωσης στο email του --
+                        # res.session θα είναι None σε αυτή την περίπτωση.
+                        if res.session is None:
+                            st.info(
+                                "📧 Σχεδόν έτοιμοι! Σου στείλαμε ένα email επιβεβαίωσης στο "
+                                f"**{email}**. Άνοιξέ το και πάτησε το link για να ενεργοποιηθεί "
+                                "ο λογαριασμός σου, και μετά επίστρεψε εδώ για να συνδεθείς."
+                            )
+                        else:
+                            st.session_state.logged_in = True
+                            st.session_state.user_id = res.user.id
+                            st.session_state.user_email = res.user.email
+                            st.session_state.user_name = name
 
-                        # Αποθηκεύουμε αμέσως το όνομα στο προφίλ, ώστε να υπάρχει
-                        # έτοιμο την επόμενη φορά που θα κάνει login.
-                        try:
-                            supabase.table("user_profiles").insert(
-                                {"id": res.user.id, "profile": {"name": name}, "chat_history": {}}
-                            ).execute()
-                        except Exception:
-                            pass
+                            # Αποθηκεύουμε αμέσως το όνομα στο προφίλ, ώστε να υπάρχει
+                            # έτοιμο την επόμενη φορά που θα κάνει login.
+                            try:
+                                supabase.table("user_profiles").insert(
+                                    {"id": res.user.id, "profile": {"name": name}, "chat_history": {}}
+                                ).execute()
+                            except Exception:
+                                pass
 
-                        st.success(f"Καλώς ήρθες, {name}! Ο λογαριασμός σου δημιουργήθηκε.")
-                        st.rerun()
+                            st.success(f"Καλώς ήρθες, {name}! Ο λογαριασμός σου δημιουργήθηκε.")
+                            st.rerun()
 
         st.markdown("</div>", unsafe_allow_html=True)
 
