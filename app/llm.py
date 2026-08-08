@@ -126,6 +126,7 @@ def llm_therapeutic_reply(
     user_text: str,
     profile: Dict[str, Any],
     active_mode: Optional[str] = None,
+    lang_instruction: str = "",
 ) -> Optional[str]:
     client = _get_client()
     if client is None:
@@ -138,6 +139,8 @@ def llm_therapeutic_reply(
         profile=profile,
         active_mode=active_mode,
     )
+    if lang_instruction:
+        system_prompt += f"\n\n{lang_instruction}"
 
     try:
         response = client.chat.completions.create(
@@ -166,6 +169,7 @@ def llm_exercise_followup(
     last_text: str,
     profile: Dict[str, Any],
     active_mode: Optional[str] = None,
+    lang_instruction: str = "",
 ) -> Optional[str]:
     client = _get_client()
     if client is None:
@@ -174,10 +178,12 @@ def llm_exercise_followup(
     prof = _format_profile_snippet(profile)
 
     system_prompt = (
-        "Είσαι υποστηρικτικός βοηθός ευεξίας στα ελληνικά.\n"
+        "Είσαι υποστηρικτικός βοηθός ευεξίας.\n"
         "Δίνεις σύντομο, τρυφερό σχόλιο 1–3 προτάσεων.\n"
         "Χωρίς διάγνωση, χωρίς ιατρικές οδηγίες, χωρίς δραματικό ύφος.\n"
     )
+    if lang_instruction:
+        system_prompt += f"{lang_instruction}\n"
 
     user_prompt = (
         f"Άσκηση: ο χρήστης διάλεξε λέξη.\n"
@@ -218,6 +224,7 @@ def llm_therapeutic_reply_with_memory(
     user_text: str,
     profile: Dict[str, Any],
     active_mode: Optional[str] = None,
+    lang_instruction: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Κάνει σε ΜΙΑ κλήση OpenAI ό,τι πριν γινόταν σε 2 ξεχωριστές
@@ -228,6 +235,10 @@ def llm_therapeutic_reply_with_memory(
     prompt (από το build_llm_user_prompt), που ήδη περιέχει μέσα του την
     προηγούμενη rolling summary / open threads / facts memory -- γι' αυτό
     δεν χρειάζεται να τα περάσουμε ξανά ως ξεχωριστές παραμέτρους εδώ.
+
+    `lang_instruction`: προαιρετική γραμμή-οδηγία γλώσσας (π.χ. από το
+    i18n.lang_directive()) που προστίθεται στο τέλος του system prompt.
+    Το llm.py δεν εξαρτάται από το i18n -- ο καλών περνάει έτοιμο κείμενο.
 
     Επιστρέφει dict {"reply", "summary", "threads", "facts"} ή None αν
     κάτι αποτύχει (τότε ο καλών κάνει fallback στο απλό, rule-based reply).
@@ -251,11 +262,13 @@ def llm_therapeutic_reply_with_memory(
         "Μην βάζεις ευαίσθητες κλινικές δηλώσεις ή λεπτομέρειες αυτοτραυματισμού/βίας στη μνήμη.\n\n"
         "ΜΟΡΦΗ ΕΞΟΔΟΥ -- ΚΡΙΣΙΜΟ: Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα έγκυρο JSON object "
         "(χωρίς markdown code fences, χωρίς κείμενο πριν/μετά), με ΑΚΡΙΒΩΣ αυτά τα keys:\n"
-        '{"reply": "<η κύρια απάντηση προς τον χρήστη, στα ελληνικά, ακολουθώντας όλους τους παραπάνω κανόνες>", '
+        '{"reply": "<η κύρια απάντηση προς τον χρήστη, ακολουθώντας όλους τους παραπάνω κανόνες>", '
         '"summary": "<ενημερωμένη σύνοψη>", "threads": ["..."], "facts": ["..."]}'
     )
 
     system_prompt = base_prompt + memory_instructions
+    if lang_instruction:
+        system_prompt += f"\n\n{lang_instruction}"
 
     try:
         response = client.chat.completions.create(
@@ -302,6 +315,7 @@ def llm_reframe_reply(
     profile: Dict[str, Any],
     techniques: List[Dict[str, Any]],
     personal_history: List[Dict[str, Any]],
+    lang_instruction: str = "",
 ) -> Optional[str]:
     """
     Παράγει ένα εξατομικευμένο reframe, βασισμένο σε:
@@ -335,7 +349,7 @@ def llm_reframe_reply(
     )
 
     system_prompt = (
-        "Είσαι υποστηρικτικό σύστημα Thought Reframe, βασισμένο σε αρχές CBT/ACT, στα ελληνικά.\n"
+        "Είσαι υποστηρικτικό σύστημα Thought Reframe, βασισμένο σε αρχές CBT/ACT.\n"
         "Δουλειά σου: να βοηθήσεις τον χρήστη να δει μια δύσκολη σκέψη από μια πιο τρυφερή, "
         "ρεαλιστική οπτική — ΧΩΡΙΣ να ακυρώσεις ή να υποτιμήσεις το συναίσθημά του.\n\n"
         "ΚΑΝΟΝΕΣ:\n"
@@ -349,6 +363,8 @@ def llm_reframe_reply(
         "- Μπορείς να κλείσεις με μία εναλλακτική φράση σε εισαγωγικά, που θα μπορούσε να πει "
         "ο χρήστης στον εαυτό του.\n"
     )
+    if lang_instruction:
+        system_prompt += f"\n{lang_instruction}\n"
 
     user_prompt = (
         f"Δύσκολη σκέψη: {thought}\n"
@@ -378,24 +394,45 @@ def llm_reframe_reply(
 # =========================================================
 # MICRO PROMPTS 
 # =========================================================
-_MICRO_FALLBACKS: Dict[str, List[str]] = {
-    "support_phrase": [
-        "Αν το πας σήμερα «με το ζόρι», είναι ήδη αρκετό. Μια μικρή ανάσα και συνεχίζουμε απαλά.",
-        "Δεν χρειάζεται να είσαι τέλειος/η για να αξίζεις φροντίδα. Μόνο άνθρωπος.",
-        "Μπορεί να είναι δύσκολο—και ταυτόχρονα, το ότι είσαι εδώ λέει κάτι καλό για σένα.",
-        "Πάμε βήμα-βήμα. Το επόμενο μικρό βήμα είναι αρκετό.",
-        "Ακόμη κι αν το μυαλό σου βιάζεται, το σώμα σου δικαιούται 30″ ηρεμίας.",
-    ],
-    "water_nudge": [
-        "Αν μπορείς, ένα ποτήρι νερό τώρα. Είναι μικρό reset για το σώμα.",
-        "Πιες λίγες γουλιές και πάρε 2 αργές ανάσες. Αυτό μετράει.",
-        "Μικρή φροντίδα: νερό + χαλάρωσε τους ώμους για 3″.",
-    ],
-    "care_reply_game": [
-        "Αυτό ακούγεται σαν σκληρή σκέψη. Μπορώ να την κρατήσω λίγο πιο απαλά, χωρίς να την πιστέψω 100%.",
-        "Αν το έλεγε φίλος μου, θα του μιλούσα πιο τρυφερά. Μπορώ να το δοκιμάσω κι εγώ.",
-        "Δεν χρειάζεται να λυθεί όλο τώρα. Μόνο να μην με χτυπάει από μέσα.",
-    ],
+_MICRO_FALLBACKS: Dict[str, Dict[str, List[str]]] = {
+    "el": {
+        "support_phrase": [
+            "Αν το πας σήμερα «με το ζόρι», είναι ήδη αρκετό. Μια μικρή ανάσα και συνεχίζουμε απαλά.",
+            "Δεν χρειάζεται να είσαι τέλειος/η για να αξίζεις φροντίδα. Μόνο άνθρωπος.",
+            "Μπορεί να είναι δύσκολο—και ταυτόχρονα, το ότι είσαι εδώ λέει κάτι καλό για σένα.",
+            "Πάμε βήμα-βήμα. Το επόμενο μικρό βήμα είναι αρκετό.",
+            "Ακόμη κι αν το μυαλό σου βιάζεται, το σώμα σου δικαιούται 30″ ηρεμίας.",
+        ],
+        "water_nudge": [
+            "Αν μπορείς, ένα ποτήρι νερό τώρα. Είναι μικρό reset για το σώμα.",
+            "Πιες λίγες γουλιές και πάρε 2 αργές ανάσες. Αυτό μετράει.",
+            "Μικρή φροντίδα: νερό + χαλάρωσε τους ώμους για 3″.",
+        ],
+        "care_reply_game": [
+            "Αυτό ακούγεται σαν σκληρή σκέψη. Μπορώ να την κρατήσω λίγο πιο απαλά, χωρίς να την πιστέψω 100%.",
+            "Αν το έλεγε φίλος μου, θα του μιλούσα πιο τρυφερά. Μπορώ να το δοκιμάσω κι εγώ.",
+            "Δεν χρειάζεται να λυθεί όλο τώρα. Μόνο να μην με χτυπάει από μέσα.",
+        ],
+    },
+    "en": {
+        "support_phrase": [
+            "If today feels like you're pushing through, that's already enough. One small breath, and we continue gently.",
+            "You don't need to be perfect to deserve care. Just human.",
+            "It can be hard — and at the same time, the fact that you're here says something good about you.",
+            "Step by step. The next small step is enough.",
+            "Even if your mind is rushing, your body deserves 30 seconds of calm.",
+        ],
+        "water_nudge": [
+            "If you can, have a glass of water now. A small reset for the body.",
+            "Take a few sips and two slow breaths. That counts.",
+            "Small act of care: water + relax your shoulders for 3 seconds.",
+        ],
+        "care_reply_game": [
+            "That sounds like a harsh thought. I can hold it a bit more gently, without believing it 100%.",
+            "If a friend said this, I'd speak to them more kindly. I can try that with myself too.",
+            "It doesn't all need to be solved right now. Just enough that it doesn't hit so hard from inside.",
+        ],
+    },
 }
 
 
@@ -414,6 +451,7 @@ def llm_micro_prompt(
     chat_tail: List[str],
     active_mode: str,
     avoid_texts: Optional[List[str]] = None,
+    lang_instruction: str = "",
 ) -> Optional[str]:
     client = _get_client()
     if client is None:
@@ -430,11 +468,13 @@ def llm_micro_prompt(
     intent = intent_map.get(exercise_key, "δώσε μια σύντομη, εξατομικευμένη φράση 1–2 προτάσεων")
 
     system_prompt = (
-        "Είσαι υποστηρικτικό σύστημα micro-coaching στα ελληνικά.\n"
+        "Είσαι υποστηρικτικό σύστημα micro-coaching.\n"
         "Παράγεις ΜΟΝΟ 1–3 προτάσεις. Όχι bullets.\n"
         "Δεν κάνεις διάγνωση, δεν δίνεις ιατρικές οδηγίες, αποφεύγεις «πρέπει».\n"
         "Να είναι φυσικό και να πατάει διακριτικά σε 1 στοιχείο από chat ή προφίλ.\n"
     )
+    if lang_instruction:
+        system_prompt += f"{lang_instruction}\n"
 
     user_prompt = (
         f"Στόχος: {intent}\n"
@@ -467,6 +507,8 @@ def micro_prompt_with_fallback(
     chat_tail: List[str],
     active_mode: str,
     avoid_texts: Optional[List[str]] = None,
+    lang_instruction: str = "",
+    lang: str = "el",
 ) -> str:
     avoid_texts = avoid_texts or []
     out = llm_micro_prompt(
@@ -475,10 +517,12 @@ def micro_prompt_with_fallback(
         chat_tail=chat_tail,
         active_mode=active_mode,
         avoid_texts=avoid_texts,
+        lang_instruction=lang_instruction,
     )
     if out:
         return out
 
-    pool = _MICRO_FALLBACKS.get(exercise_key) or _MICRO_FALLBACKS["support_phrase"]
+    lang_pools = _MICRO_FALLBACKS.get(lang) or _MICRO_FALLBACKS["el"]
+    pool = lang_pools.get(exercise_key) or lang_pools["support_phrase"]
     idx = (len(chat_tail) + len(avoid_texts)) % len(pool)
     return pool[idx]

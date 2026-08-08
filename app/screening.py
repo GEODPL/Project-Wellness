@@ -68,34 +68,38 @@ def score_phq9(answers: List[int]) -> Tuple[int, str, bool]:
     flagged_item9 = True αν η απάντηση στην ερώτηση αυτοτραυματισμού είναι > 0
     (δηλαδή ο χρήστης απάντησε κάτι διαφορετικό από "Καθόλου").
     """
+    from i18n import t as _t
+
     total = sum(answers)
     flagged = len(answers) > PHQ9_SELF_HARM_INDEX and answers[PHQ9_SELF_HARM_INDEX] > 0
 
     if total <= 4:
-        label = "Ελάχιστη ένδειξη"
+        label = _t("severity_minimal")
     elif total <= 9:
-        label = "Ήπια ένδειξη"
+        label = _t("severity_mild")
     elif total <= 14:
-        label = "Μέτρια ένδειξη"
+        label = _t("severity_moderate")
     elif total <= 19:
-        label = "Μέτρια προς σοβαρή ένδειξη"
+        label = _t("severity_mod_severe")
     else:
-        label = "Σοβαρή ένδειξη"
+        label = _t("severity_severe")
 
     return total, label, flagged
 
 
 def score_gad7(answers: List[int]) -> Tuple[int, str]:
     """Επιστρέφει (συνολικό σκορ 0-21, ετικέτα σοβαρότητας)."""
+    from i18n import t as _t
+
     total = sum(answers)
     if total <= 4:
-        label = "Ελάχιστη ένδειξη"
+        label = _t("severity_minimal")
     elif total <= 9:
-        label = "Ήπια ένδειξη"
+        label = _t("severity_mild")
     elif total <= 14:
-        label = "Μέτρια ένδειξη"
+        label = _t("severity_moderate")
     else:
-        label = "Σοβαρή ένδειξη"
+        label = _t("severity_severe")
     return total, label
 
 

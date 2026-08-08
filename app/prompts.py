@@ -123,7 +123,6 @@ ANTI-REPEAT:
 {("- " + "\n- ".join(avoid)) if avoid else "- (none)"}
 
 ΟΔΗΓΙΕΣ:
-- Ελληνικά.
 - 4–10 προτάσεις, φυσικές.
 - 0–2 ερωτήσεις μόνο αν βοηθούν.
 - Όχι bullets.
@@ -237,6 +236,8 @@ def run_wrapup_bundle(
     active_mode: Optional[str],
     mode_weights: dict,
     decision_trace: List[str],
+    lang_instruction: str = "",
+    fallback_closing_text: str = "Σε ευχαριστώ που το μοιράστηκες. Κράτα ένα μικρό βήμα φροντίδας για σήμερα και πήγαινε απαλά.",
 ) -> None:
     wrap_raw = (
         "Κλείσε τον διάλογο ήρεμα.\n"
@@ -264,6 +265,7 @@ def run_wrapup_bundle(
         user_text=wrap_prompt,
         profile=profile,
         active_mode=active_mode,
+        lang_instruction=lang_instruction,
     )
 
     if closing:
@@ -272,7 +274,7 @@ def run_wrapup_bundle(
         remember_bot_output(closing)
         decision_trace.append("Wrap-up: LLM συμπεράσματα/βήματα/κλείσιμο.")
     else:
-        rb = "Σε ευχαριστώ που το μοιράστηκες. Κράτα ένα μικρό βήμα φροντίδας για σήμερα και πήγαινε απαλά."
+        rb = fallback_closing_text
         st.session_state.messages.append(("bot", rb))
         remember_bot_output(rb)
         decision_trace.append("Wrap-up: fallback κλείσιμο (LLM None).")

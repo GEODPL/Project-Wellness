@@ -24,6 +24,10 @@ from pdf_export import generate_wellness_pdf
 import pandas as pd
 import qrcode
 from checkins import log_checkin, load_checkins_df
+from i18n import (
+    t, get_lang, set_lang, lang_directive,
+    SCREENING_INTRO_EN, ANSWER_OPTIONS_EN, PHQ9_QUESTIONS_EN, GAD7_QUESTIONS_EN,
+)
 from PIL import Image
 
 from llm import llm_exercise_followup, llm_therapeutic_reply_with_memory
@@ -335,6 +339,22 @@ if not st.session_state.logged_in:
         unsafe_allow_html=True,
     )
 
+    # Επιλογέας γλώσσας -- εδώ δεν υπάρχει ακόμα profile, οπότε κρατάμε
+    # την επιλογή μόνο στο session_state (δεν χάνεται ώσπου να κάνει
+    # login/signup ο χρήστης, οπότε πλέον αποθηκεύεται μόνιμα στο profile).
+    _pre_lang = get_lang()
+    _pre_lang_choice = st.selectbox(
+        t("language_label"),
+        options=["el", "en"],
+        format_func=lambda x: "Ελληνικά" if x == "el" else "English",
+        index=0 if _pre_lang == "el" else 1,
+        key="pre_login_lang_selector",
+        label_visibility="collapsed",
+    )
+    if _pre_lang_choice != _pre_lang:
+        set_lang(_pre_lang_choice)
+        st.rerun()
+
     col_hero, col_form = st.columns([1, 1.15], gap="medium")
 
     with col_hero:
@@ -342,12 +362,8 @@ if not st.session_state.logged_in:
             f"""
             <div class="login-hero">
               {_LOGIN_BRAND_MARK}
-              <h1>Project Wellness</h1>
-              <p>
-                Μικρά, καθημερινά check-ins για τη διάθεση, τον ύπνο και την ενυδάτωσή σου —
-                σαν ένα προσωπικό δελτίο καιρού για το πώς νιώθεις. Μια ήρεμη στιγμή παύσης,
-                κάθε μέρα.
-              </p>
+              <h1>{t("login_hero_title")}</h1>
+              <p>{t("login_hero_desc")}</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -355,32 +371,31 @@ if not st.session_state.logged_in:
 
     with col_form:
         st.markdown('<div class="chat-card login-form-card">', unsafe_allow_html=True)
-        st.markdown("<h2>Καλώς ήρθες</h2>", unsafe_allow_html=True)
+        st.markdown(f"<h2>{t('login_form_title')}</h2>", unsafe_allow_html=True)
         st.markdown(
-            "<p class='login-sub'>Συνδέσου ή δημιούργησε λογαριασμό για να συνεχίσουμε. "
-            "Τα δεδομένα σου προστατεύονται με πραγματικό λογαριασμό (email + κωδικός).</p>",
+            f"<p class='login-sub'>{t('login_form_sub')}</p>",
             unsafe_allow_html=True,
         )
 
-        auth_tab_login, auth_tab_signup = st.tabs(["🔑 Σύνδεση", "🆕 Εγγραφή"])
+        auth_tab_login, auth_tab_signup = st.tabs([t("login_tab_login"), t("login_tab_signup")])
 
         # --------------------------------------------------------
         # ΣΥΝΔΕΣΗ
         # --------------------------------------------------------
         with auth_tab_login:
-            login_email = st.text_input("Email", key="login_email")
-            login_password = st.text_input("Κωδικός", type="password", key="login_password")
+            login_email = st.text_input(t("field_email"), key="login_email")
+            login_password = st.text_input(t("field_password"), type="password", key="login_password")
 
-            if st.button("Σύνδεση", key="btn_login", use_container_width=True):
+            if st.button(t("btn_login"), key="btn_login", use_container_width=True):
                 email = (login_email or "").strip().lower()
                 password = login_password or ""
 
                 if not email or not password:
-                    st.error("Συμπλήρωσε email και κωδικό.")
+                    st.error(t("err_fill_both"))
                 else:
                     res, err = sign_in_user(email, password)
                     if err:
-                        st.error(f"⚠️ Αποτυχία σύνδεσης: {err}")
+                        st.error(t("err_login_failed", err=err))
                     elif res and res.user:
                         st.session_state.logged_in = True
                         st.session_state.user_id = res.user.id
@@ -402,66 +417,67 @@ if not st.session_state.logged_in:
                         except Exception:
                             st.session_state.user_name = fallback_name
 
-                        st.success("Καλωσήρθες πίσω!")
+                        st.success(t("success_login"))
                         st.rerun()
 
         # --------------------------------------------------------
         # ΕΓΓΡΑΦΗ
         # --------------------------------------------------------
         with auth_tab_signup:
-            signup_name = st.text_input("Όνομα χρήστη", key="signup_name")
-            signup_email = st.text_input("Email", key="signup_email")
+            signup_name = st.text_input(t("field_username"), key="signup_name")
+            signup_email = st.text_input(t("field_email"), key="signup_email")
             signup_password = st.text_input(
-                "Κωδικός (τουλάχιστον 6 χαρακτήρες)", type="password", key="signup_password"
+                t("field_password_min"), type="password", key="signup_password"
             )
             signup_password2 = st.text_input(
-                "Επιβεβαίωση κωδικού", type="password", key="signup_password2"
+                t("field_password_confirm"), type="password", key="signup_password2"
             )
 
-            if st.button("Δημιουργία λογαριασμού", key="btn_signup", use_container_width=True):
+            if st.button(t("btn_signup"), key="btn_signup", use_container_width=True):
                 name = (signup_name or "").strip()
                 email = (signup_email or "").strip().lower()
                 password = signup_password or ""
+                _signup_lang = get_lang()
 
                 if not name:
-                    st.error("Γράψε ένα όνομα χρήστη 🙂")
+                    st.error(t("err_need_name"))
                 elif not email or "@" not in email:
-                    st.error("Χρειάζομαι ένα έγκυρο email.")
+                    st.error(t("err_need_email"))
                 elif len(password) < 6:
-                    st.error("Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.")
+                    st.error(t("err_password_length"))
                 elif password != signup_password2:
-                    st.error("Οι κωδικοί δεν ταιριάζουν.")
+                    st.error(t("err_password_mismatch"))
                 else:
                     res, err = sign_up_user(email, password)
                     if err:
-                        st.error(f"⚠️ Αποτυχία εγγραφής: {err}")
+                        st.error(t("err_signup_failed", err=err))
                     elif res and res.user:
                         # Αν το "Confirm email" είναι ενεργό στη Supabase, η εγγραφή
                         # δημιουργεί τον χρήστη αλλά ΔΕΝ δίνει ενεργό session μέχρι
                         # να πατήσει το link επιβεβαίωσης στο email του --
                         # res.session θα είναι None σε αυτή την περίπτωση.
                         if res.session is None:
-                            st.info(
-                                "📧 Σχεδόν έτοιμοι! Σου στείλαμε ένα email επιβεβαίωσης στο "
-                                f"**{email}**. Άνοιξέ το και πάτησε το link για να ενεργοποιηθεί "
-                                "ο λογαριασμός σου, και μετά επίστρεψε εδώ για να συνδεθείς."
-                            )
+                            st.info(t("signup_confirm_email", email=email))
                         else:
                             st.session_state.logged_in = True
                             st.session_state.user_id = res.user.id
                             st.session_state.user_email = res.user.email
                             st.session_state.user_name = name
 
-                            # Αποθηκεύουμε αμέσως το όνομα στο προφίλ, ώστε να υπάρχει
-                            # έτοιμο την επόμενη φορά που θα κάνει login.
+                            # Αποθηκεύουμε αμέσως το όνομα (+ επιλεγμένη γλώσσα) στο
+                            # προφίλ, ώστε να υπάρχουν έτοιμα την επόμενη φορά.
                             try:
                                 supabase.table("user_profiles").insert(
-                                    {"id": res.user.id, "profile": {"name": name}, "chat_history": {}}
+                                    {
+                                        "id": res.user.id,
+                                        "profile": {"name": name, "language": _signup_lang},
+                                        "chat_history": {},
+                                    }
                                 ).execute()
                             except Exception:
                                 pass
 
-                            st.success(f"Καλώς ήρθες, {name}! Ο λογαριασμός σου δημιουργήθηκε.")
+                            st.success(t("success_signup", name=name))
                             st.rerun()
 
         st.markdown("</div>", unsafe_allow_html=True)
@@ -488,10 +504,10 @@ if not _onboarding_profile.get("onboarding_completed"):
         <div class="login-hero" style="min-height: 220px; margin-top: 0.6rem;">
           {_ONBOARD_BRAND_MARK}
           <h1 style="font-size: 1.7rem; margin-top: 0.7rem;">
-            Καλωσήρθες{f", {_greet_name}" if _greet_name else ""}!
+            {t("onboarding_greeting", name_part=f", {_greet_name}" if _greet_name else "")}
           </h1>
           <p style="max-width: 480px;">
-            Πριν ξεκινήσουμε, μια πολύ σύντομη ξενάγηση σε ό,τι θα βρεις εδώ μέσα.
+            {t("onboarding_sub")}
           </p>
         </div>
         """,
@@ -501,26 +517,24 @@ if not _onboarding_profile.get("onboarding_completed"):
     st.markdown('<div class="main-wrapper"><div class="chat-card">', unsafe_allow_html=True)
 
     st.markdown(
-        """
-        <h4 style="margin-top:0;">🗺️ Οι καρτέλες της εφαρμογής</h4>
+        f"""
+        <h4 style="margin-top:0;">{t("onboarding_tabs_heading")}</h4>
         <ul style="line-height:1.9; color: var(--text-main);">
-          <li>💬 <strong>Chat</strong> — μίλησέ μου ελεύθερα για τη μέρα σου, κρατάμε το νήμα της συζήτησης</li>
-          <li>📁 <strong>Ιστορικό</strong> — μια ήρεμη ματιά στις προηγούμενες καταγραφές σου</li>
-          <li>📊 <strong>Στατιστικά</strong> — τάσεις διάθεσης / ύπνου / νερού με τον καιρό, και το streak σου</li>
-          <li>🧘 <strong>Ασκήσεις</strong> — μικρές, διαδραστικές ασκήσεις φροντίδας</li>
-          <li>🩺 <strong>Αξιολόγηση</strong> — δύο σύντομα, επιστημονικά εργαλεία (PHQ-9 / GAD-7)</li>
-          <li>🧩 <strong>Thought Reframe Studio</strong> — βοήθεια στο να δεις δύσκολες σκέψεις από πιο τρυφερή οπτική</li>
+          <li>{t("onboarding_tab_chat")}</li>
+          <li>{t("onboarding_tab_history")}</li>
+          <li>{t("onboarding_tab_stats")}</li>
+          <li>{t("onboarding_tab_exercises")}</li>
+          <li>{t("onboarding_tab_screening")}</li>
+          <li>{t("onboarding_tab_reframe")}</li>
         </ul>
         """,
         unsafe_allow_html=True,
     )
 
     st.markdown(
-        """
+        f"""
         <div class="emergency-block" style="margin-top: 0.8rem;">
-          <strong>Μια σημαντική σημείωση:</strong> αυτή η εφαρμογή είναι εργαλείο αυτοβοήθειας,
-          δεν αντικαθιστά ψυχολόγο ή ψυχίατρο. Αν βρεθείς σε κίνδυνο, κάλεσε το
-          <strong>112</strong> ή τη Γραμμή Παρέμβασης <strong>1018</strong>.
+          {t("onboarding_safety")}
         </div>
         """,
         unsafe_allow_html=True,
@@ -529,7 +543,7 @@ if not _onboarding_profile.get("onboarding_completed"):
     st.markdown("<br>", unsafe_allow_html=True)
     col_ob1, col_ob2, col_ob3 = st.columns([1, 1.4, 1])
     with col_ob2:
-        if st.button("🚀 Ξεκινάμε", key="btn_onboarding_done", use_container_width=True):
+        if st.button(t("onboarding_button"), key="btn_onboarding_done", use_container_width=True):
             _onboarding_profile["onboarding_completed"] = True
             save_profile(_onboarding_profile)
             st.rerun()
@@ -544,26 +558,42 @@ if not _onboarding_profile.get("onboarding_completed"):
 
 user_name = st.session_state.get("user_name", "")
 subtitle = (
-    f"Καλωσήρθες, {user_name} · μικρά συναισθηματικά check-ins και μικρά αλλά σταθερά βήματα φροντίδας."
+    t("app_subtitle_greeting", name=user_name)
     if user_name
-    else "Μικρά συναισθηματικά check-ins, μικρά βήματα φροντίδας."
+    else t("app_subtitle_default")
 )
 
 st.markdown(
     f"""
     <div class="app-header">
-      <div class="app-title-left">🧠 Project Wellness</div>
+      <div class="app-title-left">{t("app_title")}</div>
       <div class="app-subtitle-right">{subtitle}</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# --- Λογαριασμός / Αποσύνδεση ---
+# --- Λογαριασμός / Γλώσσα / Αποσύνδεση ---
 with st.sidebar:
     st.markdown(f"**👤 {st.session_state.get('user_name','')}**")
     st.caption(st.session_state.get("user_email", ""))
-    if st.button("🚪 Αποσύνδεση", use_container_width=True):
+
+    _current_lang = get_lang()
+    _lang_choice = st.selectbox(
+        t("language_label"),
+        options=["el", "en"],
+        format_func=lambda x: "Ελληνικά" if x == "el" else "English",
+        index=0 if _current_lang == "el" else 1,
+        key="lang_selector",
+    )
+    if _lang_choice != _current_lang:
+        set_lang(_lang_choice)
+        _lang_profile = load_profile()
+        _lang_profile["language"] = _lang_choice
+        save_profile(_lang_profile)
+        st.rerun()
+
+    if st.button(t("logout_button"), use_container_width=True):
         sign_out_user()
         for key in ["logged_in", "user_id", "user_email", "user_name", "current_profile"]:
             st.session_state.pop(key, None)
@@ -571,15 +601,15 @@ with st.sidebar:
 
 tabs = st.tabs(
     [
-        "Chat",
-        "Ιστορικό",
-        "Στατιστικά",
-        "Ασκήσεις",
-        "🩺 Αξιολόγηση",
-        "Thought Reframe Studio",
-        "Προφίλ",
-        "Σύνδεση από κινητό",
-        "Σχετικά & Ασφάλεια",
+        t("tab_chat"),
+        t("tab_history"),
+        t("tab_stats"),
+        t("tab_exercises"),
+        t("tab_screening"),
+        t("tab_reframe"),
+        t("tab_profile"),
+        t("tab_mobile"),
+        t("tab_info"),
     ]
 )
 
@@ -609,12 +639,11 @@ with tab_chat:
     )
 
     st.markdown(
-        """
+        f"""
         <div class="page-header">
-          <h1 class='page-title'>Wellness Edition</h1>
+          <h1 class='page-title'>{t("chat_page_title")}</h1>
           <p class='page-subtitle'>
-            Μίλησέ μου για τη μέρα σου – θα κρατήσουμε συνοχή
-            και στο τέλος θα κάνουμε ήρεμο wrap-up.
+            {t("chat_page_sub")}
           </p>
         </div>
         """,
@@ -623,22 +652,22 @@ with tab_chat:
 
     if not has_basic_profile:
         st.markdown(
-            """
+            f"""
             <div class="main-wrapper">
               <div class="chat-card">
-                <h4>🔒 Το Chat είναι κλειδωμένο</h4>
+                <h4>{t("chat_locked_title")}</h4>
                 <p style="font-size:1.05rem; font-weight:600; color:#4A3D73;">
-                  Για να προχωρήσεις, συμπλήρωσε πρώτα το προφίλ σου.
+                  {t("chat_locked_body1")}
                 </p>
                 <p style="color:#6C5A9E;">
-                  Πήγαινε στην καρτέλα <strong>«Προφίλ»</strong> και συμπλήρωσε τουλάχιστον:
+                  {t("chat_locked_body2")}
                 </p>
                 <ul style="color:#6C5A9E;">
-                  <li>ένα όνομα ή ψευδώνυμο</li>
-                  <li>ή ένα πλαίσιο ζωής (π.χ. φοιτητής, εργαζόμενος)</li>
+                  <li>{t("chat_locked_li1")}</li>
+                  <li>{t("chat_locked_li2")}</li>
                 </ul>
                 <p style="margin-top:10px; color:#6C5A9E;">
-                  Μετά το “Αποθήκευση προφίλ”, το Chat ξεκλειδώνει.
+                  {t("chat_locked_body3")}
                 </p>
               </div>
             </div>
@@ -761,9 +790,9 @@ with tab_chat:
 
         col_title, col_btn = st.columns([3, 1])
         with col_title:
-            st.markdown("#### 😊 Πώς είσαι σήμερα;")
+            st.markdown(f"#### {t('chat_how_are_you')}")
         with col_btn:
-            if st.button("🔄 Νέα Συνομιλία", use_container_width=True):
+            if st.button(t("new_conversation"), use_container_width=True):
                 # Καθαρισμός προσωρινής μνήμης
                 st.session_state.messages = []
                 st.session_state.dialogue_active = False
@@ -795,14 +824,14 @@ with tab_chat:
                 st.rerun()
 
         # ΜΕΤΑΦΟΡΑ SLIDERS ΣΕ EXPANDER
-        with st.expander("📊 Σημερινό Check-in (Διάθεση, Ύπνος, Νερό)", expanded=True):
+        with st.expander(t("checkin_expander"), expanded=True):
             colA, colB, colC = st.columns(3)
             with colA:
-                mood_value = st.slider("Διάθεση (1–10)", 1, 10, 5, 1, key="chat_mood")
+                mood_value = st.slider(t("mood_label"), 1, 10, 5, 1, key="chat_mood")
             with colB:
-                sleep = st.slider("Ύπνος (ώρες, 1–10)", 1, 10, 7, 1, key="chat_sleep")
+                sleep = st.slider(t("sleep_label"), 1, 10, 7, 1, key="chat_sleep")
             with colC:
-                water = st.slider("Νερό (ποτήρια, 1–15)", 1, 15, 6, 1, key="chat_water")
+                water = st.slider(t("water_label"), 1, 15, 6, 1, key="chat_water")
 
             mood_pct = int(round((mood_value / 10.0) * 100))
             sleep_pct = int(round((sleep / 10.0) * 100))
@@ -816,16 +845,16 @@ with tab_chat:
                   <div class="checkin-metric metric-mood">
                     {mood_icon_svg}
                     <div class="v">{mood_value}/10</div>
-                    <div class="t">Διάθεση</div>
+                    <div class="t">{t("mood_metric")}</div>
                   </div>
                   <div class="checkin-metric metric-sleep">
                     <div class="v">{sleep}h</div>
-                    <div class="t">Ύπνος</div>
+                    <div class="t">{t("sleep_metric")}</div>
                     <div class="p">{sleep_pct}%</div>
                   </div>
                   <div class="checkin-metric metric-water">
                     <div class="v">{water}</div>
-                    <div class="t">Νερό</div>
+                    <div class="t">{t("water_metric")}</div>
                     <div class="p">{water_pct}%</div>
                   </div>
                 </div>
@@ -851,13 +880,13 @@ with tab_chat:
                 render_message("bot", content)
 
         if st.session_state.get("last_decision_trace"):
-            with st.expander("ℹ️ Explainable layer (τι έγινε σε αυτό το turn)"):
+            with st.expander(t("decision_trace_label")):
                 for item in st.session_state.last_decision_trace:
                     st.markdown(f"- {item}")
 
 
         # ST.CHAT_INPUT ΜΟΝΙΜΑ ΣΤΟ ΚΑΤΩ ΜΕΡΟΣ
-        user_text = st.chat_input("📝 Γράψε μου ό,τι θέλεις για τη μέρα σου:")
+        user_text = st.chat_input(t("chat_input_placeholder"))
 
         # ============================================================
         # SEND
@@ -918,6 +947,7 @@ with tab_chat:
                         last_text=ctx.get("text", ""),
                         profile=profile,
                         active_mode=active_mode,
+                        lang_instruction=lang_directive(),
                     )
                     if followup:
                         followup = safe_trim(followup, 900)
@@ -982,6 +1012,7 @@ with tab_chat:
                     user_text=prompt,
                     profile=profile,
                     active_mode=active_mode,
+                    lang_instruction=lang_directive(),
                 )
 
                 if combined:
@@ -1047,6 +1078,7 @@ with tab_chat:
                         active_mode=active_mode,
                         mode_weights=mode_weights,
                         decision_trace=decision_trace,
+                        lang_instruction=lang_directive(),
                     )
                     st.session_state.wrapup_done = True
 
@@ -1084,11 +1116,9 @@ with tab_chat:
                 st.rerun()
 
         st.markdown(
-            """
+            f"""
             <p class="footer-disclaimer">
-              Το Project Wellness είναι εργαλείο αυτοβοήθειας και ψυχοεκπαιδευτικού χαρακτήρα.
-              Δεν αντικαθιστά ψυχολόγο, ψυχίατρο ή υπηρεσίες έκτακτης ανάγκης.
-              Αν βρίσκεσαι σε κίνδυνο, κάλεσε το 112 ή τη Γραμμή Παρέμβασης 1018.
+              {t("chat_footer_disclaimer")}
             </p>
             """,
             unsafe_allow_html=True,
@@ -1792,6 +1822,8 @@ with tab_ex:
                             chat_tail=chat_tail,
                             active_mode=active_mode,
                             avoid_texts=history,
+                        lang_instruction=lang_directive(),
+                        lang=get_lang(),
                         )
 
                         history.append(msg)
@@ -1882,6 +1914,8 @@ with tab_ex:
                             chat_tail=chat_tail,
                             active_mode=active_mode,
                             avoid_texts=history,
+                        lang_instruction=lang_directive(),
+                        lang=get_lang(),
                         )
 
                         history.append(msg)
@@ -2037,6 +2071,8 @@ with tab_ex:
                 chat_tail=chat_tail,
                 active_mode=active_mode,
                 avoid_texts=history,
+            lang_instruction=lang_directive(),
+            lang=get_lang(),
             )
 
             history.append(msg)
@@ -2101,6 +2137,8 @@ with tab_ex:
                                 chat_tail=chat_tail,
                                 active_mode=active_mode,
                                 avoid_texts=history,
+                            lang_instruction=lang_directive(),
+                            lang=get_lang(),
                             )
 
                             history.append(msg)
@@ -2316,6 +2354,8 @@ with tab_ex:
                 chat_tail=chat_tail,
                 active_mode=active_mode,
                 avoid_texts=history,
+            lang_instruction=lang_directive(),
+            lang=get_lang(),
             )
 
             history.append(msg)
@@ -2407,15 +2447,18 @@ with tab_ex:
 # ============================================================
 
 with tab_screening:
+    _scr_lang = get_lang()
+    _scr_intro = SCREENING_INTRO if _scr_lang == "el" else SCREENING_INTRO_EN
+    _scr_answer_options = ANSWER_OPTIONS if _scr_lang == "el" else ANSWER_OPTIONS_EN
+    _scr_phq9_questions = PHQ9_QUESTIONS if _scr_lang == "el" else PHQ9_QUESTIONS_EN
+    _scr_gad7_questions = GAD7_QUESTIONS if _scr_lang == "el" else GAD7_QUESTIONS_EN
+
     st.markdown(
-        """
+        f"""
         <div class="page-header">
-          <h1 class='page-title'>🩺 Αξιολόγηση</h1>
+          <h1 class='page-title'>{t("screening_page_title")}</h1>
           <p class='page-subtitle'>
-            Δύο σύντομα, επιστημονικά επικυρωμένα ερωτηματολόγια αυτο-αναφοράς
-            (PHQ-9 για κατάθλιψη, GAD-7 για άγχος). Δεν αποτελούν διάγνωση —
-            είναι μια δομημένη ένδειξη που μπορεί να σε βοηθήσει να καταλάβεις
-            καλύτερα πώς νιώθεις τις τελευταίες 2 εβδομάδες.
+            {t("screening_page_sub")}
           </p>
         </div>
         """,
@@ -2425,33 +2468,31 @@ with tab_screening:
     st.markdown("<div class='main-wrapper'>", unsafe_allow_html=True)
 
     screening_choice = st.radio(
-        "Ποιο θέλεις να συμπληρώσεις;",
-        ["Κατάθλιψη (PHQ-9)", "Άγχος (GAD-7)"],
+        t("screening_choice_label"),
+        [t("screening_choice_phq9"), t("screening_choice_gad7")],
         horizontal=True,
         key="screening_choice",
     )
 
     st.markdown("---")
-    st.markdown(f"**{SCREENING_INTRO}**")
-    st.caption(
-        "Απάντησε όσο πιο ειλικρινά μπορείς — δεν υπάρχουν σωστές/λάθος απαντήσεις."
-    )
+    st.markdown(f"**{_scr_intro}**")
+    st.caption(t("screening_caption"))
 
-    answer_labels = [label for _, label in ANSWER_OPTIONS]
+    answer_labels = [label for _, label in _scr_answer_options]
 
-    if screening_choice == "Κατάθλιψη (PHQ-9)":
+    if screening_choice == t("screening_choice_phq9"):
         phq9_answers: list[int] = []
-        for i, q in enumerate(PHQ9_QUESTIONS):
+        for i, q in enumerate(_scr_phq9_questions):
             chosen_label = st.radio(
                 f"{i + 1}. {q}",
                 options=answer_labels,
                 key=f"phq9_q{i}",
                 horizontal=True,
             )
-            score_val = next(v for v, label in ANSWER_OPTIONS if label == chosen_label)
+            score_val = next(v for v, label in _scr_answer_options if label == chosen_label)
             phq9_answers.append(score_val)
 
-        if st.button("Υποβολή PHQ-9 ✨", key="submit_phq9"):
+        if st.button(t("screening_submit_phq9"), key="submit_phq9"):
             total, severity_label, flagged = score_phq9(phq9_answers)
 
             # ΚΡΙΣΙΜΟ: η ερώτηση αυτοτραυματισμού ΠΟΤΕ δεν αντιμετωπίζεται
@@ -2469,67 +2510,59 @@ with tab_screening:
             st.markdown(
                 f"""
                 <div class="reframe-card">
-                  <div class="reframe-new-title">Αποτέλεσμα PHQ-9</div>
-                  <div class="reframe-new-body"><strong>Σκορ: {total}/27</strong> — {severity_label}</div>
+                  <div class="reframe-new-title">{t("screening_result_phq9")}</div>
+                  <div class="reframe-new-body"><strong>{total}/27</strong> — {severity_label}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
             if not flagged:
-                st.info(
-                    "Αυτό είναι ένα εργαλείο screening, όχι διάγνωση. Αν σε ανησυχεί το "
-                    "αποτέλεσμα, μια συζήτηση με ψυχολόγο ή ψυχίατρο είναι καλή ιδέα."
-                )
+                st.info(t("screening_info"))
 
     else:
         gad7_answers: list[int] = []
-        for i, q in enumerate(GAD7_QUESTIONS):
+        for i, q in enumerate(_scr_gad7_questions):
             chosen_label = st.radio(
                 f"{i + 1}. {q}",
                 options=answer_labels,
                 key=f"gad7_q{i}",
                 horizontal=True,
             )
-            score_val = next(v for v, label in ANSWER_OPTIONS if label == chosen_label)
+            score_val = next(v for v, label in _scr_answer_options if label == chosen_label)
             gad7_answers.append(score_val)
 
-        if st.button("Υποβολή GAD-7 ✨", key="submit_gad7"):
+        if st.button(t("screening_submit_gad7"), key="submit_gad7"):
             total, severity_label = score_gad7(gad7_answers)
             save_screening_result("gad7", total, severity_label, gad7_answers, flagged_item9=False)
 
             st.markdown(
                 f"""
                 <div class="reframe-card">
-                  <div class="reframe-new-title">Αποτέλεσμα GAD-7</div>
-                  <div class="reframe-new-body"><strong>Σκορ: {total}/21</strong> — {severity_label}</div>
+                  <div class="reframe-new-title">{t("screening_result_gad7")}</div>
+                  <div class="reframe-new-body"><strong>{total}/21</strong> — {severity_label}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            st.info(
-                "Αυτό είναι ένα εργαλείο screening, όχι διάγνωση. Αν σε ανησυχεί το "
-                "αποτέλεσμα, μια συζήτηση με ψυχολόγο ή ψυχίατρο είναι καλή ιδέα."
-            )
+            st.info(t("screening_info"))
 
     st.markdown("---")
-    st.markdown("### 📈 Ιστορικό αξιολογήσεων")
+    st.markdown(f"### {t('screening_history_heading')}")
     screening_history = load_screening_history(limit=10)
     if screening_history:
         for h in screening_history:
             ts = (h.get("created_at") or "")[:16].replace("T", " ")
-            type_label = "PHQ-9 (κατάθλιψη)" if h.get("screening_type") == "phq9" else "GAD-7 (άγχος)"
+            type_label = t("screening_type_phq9") if h.get("screening_type") == "phq9" else t("screening_type_gad7")
             st.markdown(
                 f"- **{type_label}** — {h.get('total_score')} · {h.get('severity_label')} · {ts}"
             )
     else:
-        st.caption("Δεν υπάρχουν ακόμη καταγραφές αξιολόγησης.")
+        st.caption(t("screening_history_empty"))
 
     st.markdown(
-        """
+        f"""
         <p class="footer-disclaimer">
-          Τα PHQ-9 και GAD-7 είναι δημόσια διαθέσιμα εργαλεία screening, ευρέως
-          χρησιμοποιούμενα στην κλινική πράξη. Δεν αντικαθιστούν κλινική αξιολόγηση
-          από ειδικό. Αν βρίσκεσαι σε κίνδυνο, κάλεσε το 112 ή τη Γραμμή Παρέμβασης 1018.
+          {t("screening_footer_disclaimer")}
         </p>
         """,
         unsafe_allow_html=True,
@@ -2544,11 +2577,11 @@ with tab_screening:
 
 with tab_reframe:
     st.markdown(
-        """
+        f"""
         <div class="page-header">
-          <h1 class='page-title'>🧩 Thought Reframe Studio</h1>
+          <h1 class='page-title'>{t("reframe_page_title")}</h1>
           <p class='page-subtitle'>
-            Ένας μικρός χώρος για να μετασχηματίζεις δύσκολες σκέψεις σε πιο τρυφερές, ρεαλιστικές.
+            {t("reframe_page_sub")}
           </p>
         </div>
         """,
@@ -2557,69 +2590,63 @@ with tab_reframe:
 
     st.markdown("<div class='main-wrapper'>", unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        Σημείωσε μια σκέψη που σε ζορίζει και επίλεξε τον τρόπο σκέψης που της ταιριάζει περισσότερο.
-        Ο στόχος δεν είναι να ακυρώσουμε το συναίσθημα, αλλά να βρούμε μια φράση πιο επιεική με εσένα.
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(t("reframe_intro"), unsafe_allow_html=True)
 
-    pattern = st.selectbox(
-        "Τι μοιάζει περισσότερο με αυτή τη σκέψη;",
-        [
-            "Καταστροφολογία (τα βλέπω όλα χάλια)",
-            "Όλα ή τίποτα (είτε τέλειο είτε αποτυχία)",
-            "Διάβασμα σκέψης (υποθέτω τι σκέφτονται οι άλλοι)",
-            "Υπεργενίκευση (μια εμπειρία = πάντα έτσι)",
-            "Άλλο / δεν είμαι σίγουρος",
-        ],
-    )
-
-    pattern_explanations = {
-        "Καταστροφολογία (τα βλέπω όλα χάλια)": (
-            "Ο νους πηγαίνει στο χειρότερο σενάριο, σαν να είναι βέβαιο ότι όλα θα πάνε στραβά."
-        ),
-        "Όλα ή τίποτα (είτε τέλειο είτε αποτυχία)": (
-            "Άσπρο–μαύρο: ή τέλειο ή αποτυχία, χωρίς τις ενδιάμεσες αποχρώσεις."
-        ),
-        "Διάβασμα σκέψης (υποθέτω τι σκέφτονται οι άλλοι)": (
-            "Υποθέτεις αρνητική κρίση των άλλων χωρίς πραγματικές αποδείξεις."
-        ),
-        "Υπεργενίκευση (μια εμπειρία = πάντα έτσι)": (
-            "Μια εμπειρία γίνεται «απόδειξη» ότι πάντα έτσι θα είναι."
-        ),
-        "Άλλο / δεν είμαι σίγουρος": (
-            "Δεν ταιριάζει καθαρά σε ένα μοτίβο. Είναι ΟΚ."
-        ),
+    # Γλωσσο-ανεξάρτητα "κλειδιά" μοτίβων -- το selectbox δείχνει τη
+    # μεταφρασμένη ετικέτα, αλλά εσωτερικά δουλεύουμε με το key (ίδιο
+    # και στα Ελληνικά και στα Αγγλικά), ώστε το rule-based fallback
+    # στο reframe.py να δουλεύει σωστά ανεξαρτήτως γλώσσας.
+    _pattern_keys = ["catastrophizing", "allornothing", "mindreading", "overgeneralization", "other"]
+    _pattern_labels = {
+        "catastrophizing": t("reframe_pattern_catastrophizing"),
+        "allornothing": t("reframe_pattern_allornothing"),
+        "mindreading": t("reframe_pattern_mindreading"),
+        "overgeneralization": t("reframe_pattern_overgeneralization"),
+        "other": t("reframe_pattern_other"),
+    }
+    _pattern_explanations = {
+        "catastrophizing": t("reframe_explain_catastrophizing"),
+        "allornothing": t("reframe_explain_allornothing"),
+        "mindreading": t("reframe_explain_mindreading"),
+        "overgeneralization": t("reframe_explain_overgeneralization"),
+        "other": t("reframe_explain_other"),
     }
 
-    with st.expander("🔍 Μικρή εξήγηση για αυτό το μοτίβο"):
-        st.write(pattern_explanations.get(pattern, ""))
+    pattern_key = st.selectbox(
+        t("reframe_pattern_label"),
+        _pattern_keys,
+        format_func=lambda k: _pattern_labels[k],
+    )
+    pattern = _pattern_labels[pattern_key]
 
-    intensity = st.slider("Πόσο σε βαραίνει αυτή η σκέψη αυτή τη στιγμή;", min_value=1, max_value=10, value=7)
+    with st.expander(t("reframe_explanation_expander")):
+        st.write(_pattern_explanations.get(pattern_key, ""))
+
+    intensity = st.slider(t("reframe_intensity_label"), min_value=1, max_value=10, value=7)
 
     thought_input = st.text_area(
-        "✏️ Δύσκολη σκέψη (όπως ακριβώς σου έρχεται στο μυαλό):",
+        t("reframe_thought_label"),
         height=90,
         key="reframe_thought",
     )
 
-    if st.button("Μετασχηματισμός σκέψης ✨", key="reframe_button"):
+    if st.button(t("reframe_button"), key="reframe_button"):
         if not (thought_input or "").strip():
-            st.warning("Γράψε πρώτα τη σκέψη που σε δυσκολεύει 📝")
+            st.warning(t("reframe_warning_empty"))
         else:
-            with st.spinner("Ψάχνω σχετικές τεχνικές και συνθέτω μια απάντηση..."):
+            with st.spinner(t("reframe_spinner")):
                 reframe_profile = load_profile()
                 reframed, used_techniques, used_personal = generate_reframe_rag(
                     thought=thought_input,
                     pattern=pattern,
                     intensity=intensity,
                     profile=reframe_profile,
+                    pattern_key=pattern_key,
+                    lang=get_lang(),
                 )
 
             full_reframe = (
-                f"Βλέπω ότι αυτή η σκέψη σε βαραίνει περίπου **{intensity}/10** αυτή τη στιγμή.\n\n"
+                t("reframe_weighs_intro", intensity=intensity)
                 + reframed
             )
 
@@ -2633,9 +2660,9 @@ with tab_reframe:
             )
 
             st.markdown(
-                """
+                f"""
                 <div class="reframe-card">
-                  <div class="reframe-original-title">Αρχική σκέψη</div>
+                  <div class="reframe-original-title">{t("reframe_original_thought")}</div>
                 """,
                 unsafe_allow_html=True,
             )
@@ -2644,7 +2671,7 @@ with tab_reframe:
                 unsafe_allow_html=True,
             )
             st.markdown(
-                "<div class='reframe-new-title'>Πιο φροντιστική εκδοχή</div>",
+                f"<div class='reframe-new-title'>{t('reframe_gentler_version')}</div>",
                 unsafe_allow_html=True,
             )
             st.markdown(
@@ -2653,21 +2680,21 @@ with tab_reframe:
             )
 
             if used_techniques or used_personal:
-                with st.expander("🔎 Πηγές που χρησιμοποιήθηκαν (RAG)"):
+                with st.expander(t("reframe_sources_expander")):
                     if used_techniques:
-                        st.markdown("**Σχετικές τεχνικές από τη βιβλιοθήκη γνώσης:**")
-                        for t in used_techniques:
-                            sim = t.get("similarity", 0)
-                            st.markdown(f"- _{t.get('content','')}_  (ομοιότητα: {sim:.2f})")
+                        st.markdown(t("reframe_sources_techniques"))
+                        for tech in used_techniques:
+                            sim = tech.get("similarity", 0)
+                            st.markdown(f"- _{tech.get('content','')}_  ({sim:.2f})")
                     if used_personal:
-                        st.markdown("**Σχετικές προηγούμενες σκέψεις σου:**")
+                        st.markdown(t("reframe_sources_personal"))
                         for p in used_personal:
                             sim = p.get("similarity", 0)
-                            st.markdown(f"- «{p.get('thought','')}» (ομοιότητα: {sim:.2f})")
+                            st.markdown(f"- «{p.get('thought','')}» ({sim:.2f})")
 
     if st.session_state.reframes_history:
         st.markdown("---")
-        st.markdown("### 📚 Μικρό ιστορικό μετασχηματισμών")
+        st.markdown(f"### {t('reframe_history_heading')}")
 
         for item in reversed(st.session_state.reframes_history[-5:]):
             orig = html.escape(item["thought"])
@@ -2679,11 +2706,11 @@ with tab_reframe:
                 f"""
                 <div class="history-card">
                   <div class="history-card-header">
-                    <span class="history-date">Μοτίβο: {pat}</span>
-                    <span class="history-mood-pill mood-mid">Ένταση: {inten}/10</span>
+                    <span class="history-date">{t("reframe_history_pattern")}: {pat}</span>
+                    <span class="history-mood-pill mood-mid">{t("reframe_history_intensity")}: {inten}/10</span>
                   </div>
-                  <div class="history-message"><strong>Σκέψη:</strong> «{orig}»</div>
-                  <div class="history-message" style="margin-top:0.3rem;"><strong>Νέα εκδοχή:</strong> {ref}</div>
+                  <div class="history-message"><strong>{t("reframe_history_thought")}:</strong> «{orig}»</div>
+                  <div class="history-message" style="margin-top:0.3rem;"><strong>{t("reframe_history_new")}:</strong> {ref}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
