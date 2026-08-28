@@ -175,6 +175,146 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "reframe_sources_expander": "🔎 Πηγές που χρησιμοποιήθηκαν (RAG)",
         "reframe_sources_techniques": "**Σχετικές τεχνικές από τη βιβλιοθήκη γνώσης:**",
         "reframe_sources_personal": "**Σχετικές προηγούμενες σκέψεις σου:**",
+
+        # --- Profile tab ---
+        "profile_page_title": "🌿 Προφίλ Φροντίδας",
+        "profile_page_sub": "Μοιράσου όσα νιώθεις άνετα. Όσο πιο πολύ σε γνωρίζω, τόσο πιο σωστά θα σε υποστηρίζω.",
+        "profile_section_identity": "👤 Ποιος/α είσαι;",
+        "profile_name": "Όνομα ή ψευδώνυμο",
+        "profile_age": "Ηλικία (προαιρετικό)",
+        "profile_context": "Ρόλος/Ασχολία (π.χ. φοιτητής, υπάλληλος)",
+        "profile_section_goals": "🧭 Στόχοι & Δυσκολίες",
+        "profile_main_goals": "Ποιοι είναι οι βασικοί σου στόχοι ευεξίας;",
+        "profile_main_struggles": "Τι σε δυσκολεύει περισσότερο τον τελευταίο καιρό;",
+        "profile_helpful_things": "Τι σε βοηθά συνήθως να νιώσεις καλύτερα (ακόμη κι αν είναι κάτι μικρό);",
+        "profile_section_ai": "🤖 Προτιμήσεις Αλληλεπίδρασης",
+        "profile_preferred_tone": "Πώς θες να σου μιλάω; (π.χ. πρακτικός, ζεστός, άμεσος)",
+        "profile_triggers": "Θέματα ή λέξεις που προτιμάς να αποφεύγουμε;",
+        "profile_soothing_things": "Υπάρχουν εικόνες, σκέψεις ή συνήθειες που σε ηρεμούν;",
+        "profile_save_button": "💾 Αποθήκευση & Ενημέρωση Προφίλ",
+        "profile_saved_toast": "✨ Το προφίλ ενημερώθηκε!",
+
+        # --- Info tab ---
+        "info_page_title": "🛡️ Σχετικά & Ασφάλεια",
+        "info_page_sub": "Διαφάνεια, σεβασμός στα δεδομένα σου και εργαλεία υποστήριξης.",
+        "info_how_it_works_title": "🧠 Πώς Λειτουργεί",
+        "info_how_it_works_body": (
+            "Το Project Wellness χρησιμοποιεί προηγμένη Τεχνητή Νοημοσύνη, ρυθμισμένη να απαντά με τη "
+            "<strong>Μαιευτική Μέθοδο (Socratic Questioning)</strong>. "
+            "Δεν δίνει έτοιμες, ρομποτικές λύσεις, αλλά σε βοηθά να αναγνωρίσεις γνωστικές παγίδες και να "
+            "βρεις τις δικές σου απαντήσεις μέσα από στοχευμένες ερωτήσεις."
+        ),
+        "info_safety_title": "🚨 Μέτρα Ασφαλείας",
+        "info_safety_body": (
+            "Το σύστημα διαθέτει μηχανισμούς ανίχνευσης λέξεων-κλειδιών. Αν αντιληφθεί ένδειξη κρίσης ή κινδύνου, "
+            "σταματά την κανονική ροή συζήτησης και ενεργοποιεί ένα <strong>ειδικό πρωτόκολλο ασφαλείας</strong> "
+            "με πηγές άμεσης βοήθειας."
+        ),
+        "info_privacy_title": "🔒 Απόρρητο Δεδομένων",
+        "info_privacy_body": (
+            "Η είσοδος στην εφαρμογή γίνεται πλέον με <strong>πραγματικό λογαριασμό</strong> (email + κωδικός), "
+            "μέσω της υπηρεσίας Supabase Auth, και το ιστορικό σου προστατεύεται με πολιτικές Row Level Security "
+            "ώστε να το βλέπεις μόνο εσύ. Τα δεδομένα που στέλνονται στο API του OpenAI είναι κρυπτογραφημένα "
+            "και <strong>δεν</strong> χρησιμοποιούνται για την εκπαίδευση μελλοντικών μοντέλων τους."
+        ),
+        "info_helplines_title": "☎️ Γραμμές Βοήθειας (24/7)",
+        "info_helpline_112": "<strong>112</strong> – Άμεση ανάγκη (Πανευρωπαϊκός)",
+        "info_helpline_1018": "<strong>1018</strong> – Γραμμή Παρέμβασης για την Αυτοκτονία",
+        "info_helpline_10306": "<strong>10306</strong> – Γραμμή Ψυχοκοινωνικής Υποστήριξης",
+        "info_helpline_1056": "<strong>1056</strong> – Το Χαμόγελο του Παιδιού",
+        "info_disclaimer": (
+            "<strong>⚠️ Σημαντική Υπενθύμιση:</strong> Το Project Wellness είναι ένα πειραματικό εργαλείο "
+            "αυτοβοήθειας. Σε καμία περίπτωση δεν υποκαθιστά την κλινική διάγνωση, τον ψυχολόγο ή τον ψυχίατρο."
+        ),
+
+        # --- History tab ---
+        "history_page_title": "📁 Ιστορικό Καταγραφών",
+        "history_page_sub": "Μια ήρεμη, καθαρή ματιά στις προηγούμενες καταγραφές σου.",
+        "history_empty": "Δεν υπάρχουν ακόμη καταγραφές. Κάνε πρώτα ένα check-in στην καρτέλα «Chat».",
+        "history_heading": "🪪 Το Χρονολόγιό σου",
+        "history_badge_mood": "🧠 Διάθεση",
+        "history_badge_sleep": "😴 Ύπνος",
+        "history_badge_water": "💧 Νερό",
+
+        # --- Stats tab ---
+        "stats_page_title": "📊 Στατιστικά Ευεξίας",
+        "stats_page_sub": "Μια ζωντανή, οπτική απεικόνιση των πρόσφατων check-ins σου.",
+        "stats_empty": "Δεν βρέθηκε ακόμη καταγραφή. Κάνε πρώτα ένα check-in στην καρτέλα «Chat».",
+        "stats_streak_day": "μέρα",
+        "stats_streak_days": "μέρες",
+        "stats_streak_label": "Συνεχόμενο streak check-ins",
+        "stats_pdf_generate": "📄 Δημιουργία PDF",
+        "stats_pdf_download": "⬇️ Λήψη PDF",
+        "stats_window_15": "Τελευταίες 15",
+        "stats_window_30": "Τελευταίες 30",
+        "stats_window_90": "Τελευταίες 90",
+        "stats_avg_period": "Μ.Ο. περιόδου",
+        "stats_water_unit": "ποτ.",
+        "stats_no_dates": "Δεν υπάρχουν έγκυρες ημερομηνίες για να φτιάξω τα διαγράμματα.",
+        "stats_chart_mood": "🧠 Διακυμάνσεις Διάθεσης",
+        "stats_chart_sleep": "😴 Ποιότητα Ύπνου (Ώρες)",
+        "stats_chart_water": "💧 Ενυδάτωση (Ποτήρια)",
+        "stats_dataset_mood": "Διάθεση (1-10)",
+        "stats_dataset_sleep": "Ώρες Ύπνου",
+        "stats_dataset_water": "Ποτήρια Νερό",
+
+        # --- Mobile tab ---
+        "mobile_page_title": "📱 Σύνδεση από κινητό",
+        "mobile_page_sub": "Συνέχισε την ίδια συνεδρία στο κινητό σου, μέσα από το τοπικό σου δίκτυο.",
+        "mobile_badge": "🌐 Τοπικό Δίκτυο",
+        "mobile_heading": "Συνδέσου από το κινητό",
+        "mobile_body": (
+            "Άνοιξε την κάμερα του κινητού σου και σκάναρε τον κωδικό. "
+            "Θα μεταφερθείς απευθείας στο Project Wellness, με την προϋπόθεση "
+            "ότι και οι δύο συσκευές είναι στο <b>ίδιο δίκτυο Wi-Fi</b>."
+        ),
+        "mobile_copy_button": "Αντιγραφή",
+        "mobile_copied_button": "Αντιγράφηκε! ✓",
+
+        # --- Exercises tab: page header ---
+        "ex_page_title": "🧘 Μικρή Βιβλιοθήκη Ασκήσεων",
+        "ex_page_sub": "Μικρές ασκήσεις φροντίδας και ήρεμα διαδραστικά κουμπάκια, προσαρμοσμένα σε εσένα.",
+
+        # --- Exercise 1: Breathing ---
+        "ex1_heading": "1. Διαδραστική Άσκηση Αναπνοής 4–2–6",
+        "ex1_caption": "Συγχρόνισε την αναπνοή σου με τον κύκλο. Χρησιμεύει για άμεση μείωση του στρες.",
+        "ex1_ready": "Έτοιμος;",
+        "ex1_start": "Ξεκίνα Άσκηση",
+        "ex1_inhale": "Εισπνοή (4)",
+        "ex1_hold": "Κράτα (2)",
+        "ex1_exhale": "Εκπνοή (6)",
+
+        # --- Exercise 2: Thought discharge ---
+        "ex2_heading": "2. Μικρή άσκηση αποφόρτισης σκέψεων",
+        "ex2_caption": "Σημείωσε αυτό που σε βαραίνει. Το σύστημα θα το διαβάσει με ενσυναίσθηση και θα σου επιστρέψει μια σκέψη φροντίδας πριν το αφήσεις να φύγει.",
+        "ex2_input_label": "📝 «Αυτό που με βαραίνει περισσότερο είναι…»",
+        "ex2_button": "Αποφόρτιση ✨",
+        "ex2_warning_empty": "Γράψε κάτι μικρό πρώτα για να μπορέσω να βοηθήσω...",
+        "ex2_spinner": "Δίνουμε χώρο στη σκέψη σου...",
+        "ex2_reset_button": "🔄 Νέα αποφόρτιση",
+
+        # --- Exercise 3: Loneliness/sadness ---
+        "ex3_heading": "3. Άσκηση ηρεμίας για θλίψη / μοναξιά",
+        "ex3_caption": "Μια μικρή παύση για να υπενθυμίσεις στον εαυτό σου ότι δεν είσαι μόνος/η, προσαρμοσμένη ακριβώς σε αυτό που νιώθεις.",
+        "ex3_intro": "Όταν νιώθεις μοναξιά ή βάρος, κάνε αυτό το μικρό δώρο στον εαυτό σου.",
+        "ex3_start_button": "Ξεκίνα τη στιγμή φροντίδας ✨",
+        "ex3_spinner": "Αφουγκράζομαι το πώς νιώθεις...",
+        "ex3_step1": "<strong>1.</strong> Βάλε το χέρι σου στο κέντρο του στήθους και νιώσε τη ζεστασιά σου.<br>",
+        "ex3_step2": "<strong>2.</strong> Πάρε μια αργή, βαθιά ανάσα.<br>",
+        "ex3_step3": "<strong>3.</strong> Διάβασε αυτά τα λόγια:",
+        "ex3_return_button": "🔄 Επιστροφή",
+
+        # --- Exercise 4: Water ---
+        "ex4_heading": "4. Μικρή άσκηση φροντίδας σώματος (Ενυδάτωση)",
+        "ex4_glass_hint": "Πιες 1 ποτήρι νερό & κάνε κλικ:",
+        "ex4_glass_title": "Κάνε κλικ για να γεμίσει!",
+        "ex4_cheers": "Εξαιρετικά! 💧 Το σώμα σου σε ευχαριστεί.",
+        "ex4_side_text": "Ένα ποτήρι νερό είναι μια πολύ μικρή, αλλά ουσιαστική πράξη φροντίδας για το νευρικό σου σύστημα.\n\nΠάρε 3 αργές αναπνοές καθώς το πίνεις.",
+        "ex4_button": "✨ Φράση για το νερό",
+
+        # --- Exercise 5: 3 small supports ---
+        "ex5_heading_suffix": "Άσκηση «3 μικρά στηρίγματα της ημέρας»",
+        "ex5_caption": "Σημείωσε τρία μικρά πράγματα που σε στήριξαν σήμερα (όσο μικρά κι αν φαίνονται). Το σύστημα θα τα διαβάσει και θα σου δώσει μια δική σου, μοναδική οπτική γι' αυτά.",
         "reframe_explanation_expander": "🔍 Μικρή εξήγηση για αυτό το μοτίβο",
         "reframe_explain_catastrophizing": "Ο νους πηγαίνει στο χειρότερο σενάριο, σαν να είναι βέβαιο ότι όλα θα πάνε στραβά.",
         "reframe_explain_allornothing": "Άσπρο–μαύρο: ή τέλειο ή αποτυχία, χωρίς τις ενδιάμεσες αποχρώσεις.",
@@ -349,6 +489,146 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "reframe_sources_expander": "🔎 Sources used (RAG)",
         "reframe_sources_techniques": "**Relevant techniques from the knowledge base:**",
         "reframe_sources_personal": "**Your relevant past thoughts:**",
+
+        # --- Profile tab ---
+        "profile_page_title": "🌿 Care Profile",
+        "profile_page_sub": "Share whatever feels comfortable. The more I know you, the better I can support you.",
+        "profile_section_identity": "👤 Who are you?",
+        "profile_name": "Name or nickname",
+        "profile_age": "Age (optional)",
+        "profile_context": "Role/Occupation (e.g. student, employee)",
+        "profile_section_goals": "🧭 Goals & Struggles",
+        "profile_main_goals": "What are your main wellness goals?",
+        "profile_main_struggles": "What's been troubling you the most lately?",
+        "profile_helpful_things": "What usually helps you feel better (even something small)?",
+        "profile_section_ai": "🤖 Interaction Preferences",
+        "profile_preferred_tone": "How would you like me to talk to you? (e.g. practical, warm, direct)",
+        "profile_triggers": "Topics or words you'd prefer we avoid?",
+        "profile_soothing_things": "Are there images, thoughts, or habits that calm you?",
+        "profile_save_button": "💾 Save & Update Profile",
+        "profile_saved_toast": "✨ Profile updated!",
+
+        # --- Info tab ---
+        "info_page_title": "🛡️ About & Safety",
+        "info_page_sub": "Transparency, respect for your data, and support tools.",
+        "info_how_it_works_title": "🧠 How It Works",
+        "info_how_it_works_body": (
+            "Project Wellness uses advanced AI, tuned to respond using the "
+            "<strong>Socratic Method</strong>. "
+            "It doesn't give ready-made, robotic solutions — instead it helps you recognize cognitive "
+            "traps and find your own answers through targeted questions."
+        ),
+        "info_safety_title": "🚨 Safety Measures",
+        "info_safety_body": (
+            "The system has keyword-detection mechanisms. If it detects a sign of crisis or risk, "
+            "it stops the normal conversation flow and activates a <strong>special safety protocol</strong> "
+            "with immediate help resources."
+        ),
+        "info_privacy_title": "🔒 Data Privacy",
+        "info_privacy_body": (
+            "Access to the app now requires a <strong>real account</strong> (email + password), via "
+            "Supabase Auth, and your history is protected by Row Level Security policies so that only you "
+            "can see it. Data sent to the OpenAI API is encrypted and is <strong>not</strong> used to train "
+            "their future models."
+        ),
+        "info_helplines_title": "☎️ Helplines (24/7)",
+        "info_helpline_112": "<strong>112</strong> – Emergency (Pan-European)",
+        "info_helpline_1018": "<strong>1018</strong> – Suicide Prevention Helpline (Greece)",
+        "info_helpline_10306": "<strong>10306</strong> – Psychosocial Support Line (Greece)",
+        "info_helpline_1056": "<strong>1056</strong> – Child's Smile Helpline (Greece)",
+        "info_disclaimer": (
+            "<strong>⚠️ Important Reminder:</strong> Project Wellness is an experimental self-help tool. "
+            "It does not, under any circumstances, replace clinical diagnosis, a psychologist, or a psychiatrist."
+        ),
+
+        # --- History tab ---
+        "history_page_title": "📁 Entry History",
+        "history_page_sub": "A calm, clear look at your past entries.",
+        "history_empty": "No entries yet. Do a check-in in the «Chat» tab first.",
+        "history_heading": "🪪 Your Timeline",
+        "history_badge_mood": "🧠 Mood",
+        "history_badge_sleep": "😴 Sleep",
+        "history_badge_water": "💧 Water",
+
+        # --- Stats tab ---
+        "stats_page_title": "📊 Wellness Statistics",
+        "stats_page_sub": "A live, visual overview of your recent check-ins.",
+        "stats_empty": "No entries found yet. Do a check-in in the «Chat» tab first.",
+        "stats_streak_day": "day",
+        "stats_streak_days": "days",
+        "stats_streak_label": "Consecutive check-in streak",
+        "stats_pdf_generate": "📄 Generate PDF",
+        "stats_pdf_download": "⬇️ Download PDF",
+        "stats_window_15": "Last 15",
+        "stats_window_30": "Last 30",
+        "stats_window_90": "Last 90",
+        "stats_avg_period": "Period avg.",
+        "stats_water_unit": "glasses",
+        "stats_no_dates": "There are no valid dates to build the charts.",
+        "stats_chart_mood": "🧠 Mood Fluctuations",
+        "stats_chart_sleep": "😴 Sleep Quality (Hours)",
+        "stats_chart_water": "💧 Hydration (Glasses)",
+        "stats_dataset_mood": "Mood (1-10)",
+        "stats_dataset_sleep": "Sleep Hours",
+        "stats_dataset_water": "Water Glasses",
+
+        # --- Mobile tab ---
+        "mobile_page_title": "📱 Connect from Mobile",
+        "mobile_page_sub": "Continue the same session on your phone, over your local network.",
+        "mobile_badge": "🌐 Local Network",
+        "mobile_heading": "Connect from your phone",
+        "mobile_body": (
+            "Open your phone's camera and scan the code. "
+            "You'll be taken straight to Project Wellness, provided "
+            "both devices are on the <b>same Wi-Fi network</b>."
+        ),
+        "mobile_copy_button": "Copy",
+        "mobile_copied_button": "Copied! ✓",
+
+        # --- Exercises tab: page header ---
+        "ex_page_title": "🧘 Small Exercise Library",
+        "ex_page_sub": "Small self-care exercises and calm, interactive widgets, tailored to you.",
+
+        # --- Exercise 1: Breathing ---
+        "ex1_heading": "1. Interactive 4–2–6 Breathing Exercise",
+        "ex1_caption": "Sync your breathing with the circle. Helps for immediate stress reduction.",
+        "ex1_ready": "Ready?",
+        "ex1_start": "Start Exercise",
+        "ex1_inhale": "Inhale (4)",
+        "ex1_hold": "Hold (2)",
+        "ex1_exhale": "Exhale (6)",
+
+        # --- Exercise 2: Thought discharge ---
+        "ex2_heading": "2. Small Thought-Discharge Exercise",
+        "ex2_caption": "Write down what's weighing on you. The system will read it with empathy and give you a caring thought before you let it go.",
+        "ex2_input_label": "📝 \"What weighs on me the most is…\"",
+        "ex2_button": "Discharge ✨",
+        "ex2_warning_empty": "Write a little something first so I can help...",
+        "ex2_spinner": "Making space for your thought...",
+        "ex2_reset_button": "🔄 New discharge",
+
+        # --- Exercise 3: Loneliness/sadness ---
+        "ex3_heading": "3. Calming Exercise for Sadness / Loneliness",
+        "ex3_caption": "A small pause to remind yourself you're not alone, tailored to exactly what you're feeling.",
+        "ex3_intro": "When you feel lonely or heavy, give yourself this small gift.",
+        "ex3_start_button": "Start the caring moment ✨",
+        "ex3_spinner": "Listening to how you feel...",
+        "ex3_step1": "<strong>1.</strong> Place your hand on the center of your chest and feel your warmth.<br>",
+        "ex3_step2": "<strong>2.</strong> Take a slow, deep breath.<br>",
+        "ex3_step3": "<strong>3.</strong> Read these words:",
+        "ex3_return_button": "🔄 Go back",
+
+        # --- Exercise 4: Water ---
+        "ex4_heading": "4. Small Body-Care Exercise (Hydration)",
+        "ex4_glass_hint": "Drink 1 glass of water & click:",
+        "ex4_glass_title": "Click to fill!",
+        "ex4_cheers": "Great! 💧 Your body thanks you.",
+        "ex4_side_text": "A glass of water is a very small, but meaningful act of care for your nervous system.\n\nTake 3 slow breaths as you drink it.",
+        "ex4_button": "✨ A phrase about water",
+
+        # --- Exercise 5: 3 small supports ---
+        "ex5_heading_suffix": "\"3 Small Supports of the Day\" Exercise",
+        "ex5_caption": "Write down three small things that supported you today (however small they may seem). The system will read them and give you a unique perspective on them.",
         "reframe_explanation_expander": "🔍 A short explanation of this pattern",
         "reframe_explain_catastrophizing": "The mind jumps to the worst-case scenario, as if it were certain everything will go wrong.",
         "reframe_explain_allornothing": "Black-and-white: either perfect or a failure, with no shades in between.",
