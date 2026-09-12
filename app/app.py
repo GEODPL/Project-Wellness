@@ -2109,21 +2109,21 @@ with tab_ex:
             # Χρησιμοποιούμε στήλες για να μπουν δίπλα-δίπλα τα πεδία
             col_s1, col_s2, col_s3 = st.columns(3)
             with col_s1:
-                s1 = st.text_input("1ο στήριγμα...", key="sup1")
+                s1 = st.text_input(t("ex5_support1"), key="sup1")
             with col_s2:
-                s2 = st.text_input("2ο στήριγμα...", key="sup2")
+                s2 = st.text_input(t("ex5_support2"), key="sup2")
             with col_s3:
-                s3 = st.text_input("3ο στήριγμα...", key="sup3")
+                s3 = st.text_input(t("ex5_support3"), key="sup3")
                 
             st.markdown("<br>", unsafe_allow_html=True)
             col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
             with col_btn2:
-                if st.button("Κράτησε τα στηρίγματα ✨", use_container_width=True, key="btn_save_supports"):
+                if st.button(t("ex5_button"), use_container_width=True, key="btn_save_supports"):
                     supports = [s for s in [s1, s2, s3] if s.strip()]
                     if not supports:
-                        st.warning("Γράψε τουλάχιστον ένα στήριγμα για να προχωρήσουμε 🌿")
+                        st.warning(t("ex5_warning_empty"))
                     else:
-                        with st.spinner("Συνθέτω τα στηρίγματά σου..."):
+                        with st.spinner(t("ex5_spinner")):
                             profile = load_profile()
                             supports_text = ", ".join(supports)
                             
@@ -2172,7 +2172,7 @@ with tab_ex:
             # ΕΔΩ: Η HTML χωρίς κενά στην αρχή της κάθε γραμμής
             st.markdown(
                 f"""<div style="background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 16px; padding: 30px; text-align: center; box-shadow: 0 12px 40px rgba(108, 90, 158, 0.08); animation: cardFadeIn 0.8s ease-out;">
-<h3 style="color: #4A3D73; font-size: 1.1rem; margin-top: 0;">Τα σημερινά σου θεμέλια:</h3>
+<h3 style="color: #4A3D73; font-size: 1.1rem; margin-top: 0;">{t("ex5_foundations_title")}</h3>
 {pillars_html}
 <div style="background: rgba(255, 255, 255, 0.75); border-left: 4px solid #baf7c3; padding: 20px; border-radius: 12px; margin-top: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.02);">
 <div style="color: #158047; font-size: 1.05rem; line-height: 1.6; font-weight: 500; font-style: italic;">
@@ -2185,7 +2185,7 @@ with tab_ex:
             
             col_l1, col_lbtn, col_l2 = st.columns([1, 1, 1])
             with col_lbtn:
-                if st.button("🔄 Νέα καταγραφή", key="reset_supports", use_container_width=True):
+                if st.button(t("ex5_reset_button"), key="reset_supports", use_container_width=True):
                     st.session_state.supports_done = False
                     st.session_state.supports_msg = ""
                     st.session_state.user_supports = []
@@ -2196,10 +2196,9 @@ with tab_ex:
     # --------------------------------------------------------
     # 6. Body scan (ΜΕ JAVASCRIPT ZEN ANIMATION)
     # --------------------------------------------------------
-    st.markdown("### 6. Μικρή σωματική σάρωση (Guided Body Scan)")
+    st.markdown(f"### {t('ex6_heading')}")
 
-    components.html(
-        """
+    _ex6_html = """
         <!DOCTYPE html>
         <html>
         <head>
@@ -2252,17 +2251,15 @@ with tab_ex:
         <body>
             <div class="scan-card">
                 <div id="intro" class="intro-text">
-                    <strong>1 Λεπτό Σωματικής Σάρωσης</strong><br><br>
-                    Κλείσε τα μάτια, πάρε μια ανάσα και όταν είσαι έτοιμος/η πάτα το κουμπί. <br>
-                    Μόνο παρατήρηση του σώματος — χωρίς προσπάθεια για διόρθωση.
+                    __INTRO__
                 </div>
                 
                 <div id="orb" class="orb">
-                    <span id="orbText" class="focus-text">Μέτωπο & Μάτια</span>
+                    <span id="orbText" class="focus-text">__STAGE1__</span>
                 </div>
                 
                 <br>
-                <button id="startBtn" onclick="startScan()">Ξεκίνα τη σάρωση</button>
+                <button id="startBtn" onclick="startScan()">__START__</button>
             </div>
 
             <script>
@@ -2274,11 +2271,11 @@ with tab_ex:
 
                     // Τα στάδια της σάρωσης
                     const stages = [
-                        "Μέτωπο & Μάτια",
-                        "Ώμοι & Αυχένας",
-                        "Στήθος & Κοιλιά",
-                        "Παλάμες & Πέλματα",
-                        "Ολοκλήρωση 🌿"
+                        "__STAGE1__",
+                        "__STAGE2__",
+                        "__STAGE3__",
+                        "__STAGE4__",
+                        "__STAGE5__"
                     ];
                     
                     // Κρύβουμε εισαγωγή και κουμπί
@@ -2306,7 +2303,7 @@ with tab_ex:
                                 orb.classList.remove('active');
                                 orb.style.opacity = 0;
                                 setTimeout(() => {
-                                    intro.innerHTML = "<strong>Ολοκληρώθηκε!</strong><br>Ελπίζω να νιώθεις λίγο πιο γειωμένος/η.";
+                                    intro.innerHTML = "__COMPLETE__";
                                     intro.style.display = 'block';
                                 }, 1500);
                             }, 3000);
@@ -2324,32 +2321,42 @@ with tab_ex:
             </script>
         </body>
         </html>
-        """,
-        height=320,
+        """
+    _ex6_html = (
+        _ex6_html
+        .replace("__INTRO__", t("ex6_intro"))
+        .replace("__STAGE1__", t("ex6_stage1"))
+        .replace("__STAGE2__", t("ex6_stage2"))
+        .replace("__STAGE3__", t("ex6_stage3"))
+        .replace("__STAGE4__", t("ex6_stage4"))
+        .replace("__STAGE5__", t("ex6_stage5"))
+        .replace("__START__", t("ex6_start_button"))
+        .replace("__COMPLETE__", t("ex6_complete"))
     )
+    components.html(_ex6_html, height=320)
     st.markdown("---")
 
     # --------------------------------------------------------
     # 7. Μικρό παιχνίδι – φροντιστική απάντηση (ΜΕ 3D FLIP CARD)
     # --------------------------------------------------------
-    st.markdown("### 🧩 Μικρό παιχνίδι: «Απάντηση φροντίδας»")
-    st.write("Επίλεξε μια δύσκολη σκέψη. Δες πώς μπορεί να μεταμορφωθεί όταν της δώσεις λίγο χώρο.")
+    st.markdown(f"### {t('ex7_heading')}")
+    st.write(t("ex7_caption"))
 
     difficult_thoughts = [
-        "Αποτυγχάνω σε όλα.",
-        "Δεν αξίζω την αγάπη των άλλων.",
-        "Οι άλλοι θα με θεωρήσουν αδύναμο/η.",
-        "Δεν θα αλλάξει ποτέ τίποτα.",
+        t("ex7_thought1"),
+        t("ex7_thought2"),
+        t("ex7_thought3"),
+        t("ex7_thought4"),
     ]
 
     chosen_label = st.selectbox(
-        "Διάλεξε μία δύσκολη σκέψη:",
+        t("ex7_select_label"),
         difficult_thoughts,
         key="mh_game_select",
     )
 
-    if st.button("Μεταμόρφωσε τη σκέψη ✨", key="mh_game_button"):
-        with st.spinner("Το σύστημα σκέφτεται μια πιο ζεστή οπτική..."):
+    if st.button(t("ex7_button"), key="mh_game_button"):
+        with st.spinner(t("ex7_spinner")):
             # Κλήση στο LLM (Backend)
             profile = load_profile()
             chat_tail = get_chat_tail_from_state() + [f"Δύσκολη σκέψη: {chosen_label}"]
@@ -2426,11 +2433,11 @@ with tab_ex:
                         <div class="flip-card-inner">
                             <div class="flip-card-front">
                                 <div class="front-text">«{safe_thought}»</div>
-                                <div class="hint">Περίμενε...</div>
+                                <div class="hint">{t("ex7_hint_wait")}</div>
                             </div>
                             <div class="flip-card-back">
                                 <div class="back-text">{safe_msg}</div>
-                                <div class="hint">✨ Κάνε κλικ για να γυρίσεις την κάρτα</div>
+                                <div class="hint">{t("ex7_flip_hint")}</div>
                             </div>
                         </div>
                     </div>
@@ -2440,7 +2447,7 @@ with tab_ex:
                         setTimeout(() => {{
                             const card = document.querySelector('.flip-card-inner');
                             card.classList.add('flipped');
-                            document.querySelector('.flip-card-front .hint').innerText = "👆 Κάνε κλικ";
+                            document.querySelector('.flip-card-front .hint').innerText = "{t("ex7_hint_click")}";
                         }}, 1200);
                     </script>
                 </body>
