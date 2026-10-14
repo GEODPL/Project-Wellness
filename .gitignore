@@ -1,5 +1,4 @@
 venv/ 
-_pycache_/
 .ipynb_checkpoints/
 # secrets 
 .streamlit/secrets.toml
@@ -35,3 +34,7 @@ __pycache__/
 venv/
 env/
 .DS_Store
+
+# --- Τοπικοί φάκελοι secrets με παραλλαγές ονόματος ---
+.streamlit*/
+secrets.toml
