@@ -38,3 +38,5 @@ env/
 # --- Τοπικοί φάκελοι secrets με παραλλαγές ονόματος ---
 .streamlit*/
 secrets.toml
+
+.streamlit2/
