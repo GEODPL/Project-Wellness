@@ -1,27 +1,63 @@
-def personal_reply(mood: int, sleep: str, water: str) -> str:
+"""
+rules.py
+========
+Rule-based απαντήσεις, fallbacks και emergency gate.
+
+ΔΙΟΡΘΩΣΗ: Οι συναρτήσεις personal_reply / fallback_therapeutic_reply /
+exercise_suggestion περίμεναν παλιά κλίμακα (διάθεση 0-100, ύπνος/νερό ως
+διαστήματα κειμένου όπως "3–5"). Το app δίνει πλέον ακέραιους:
+  - διάθεση 1-10
+  - ύπνος σε ώρες (1-10)
+  - νερό σε ποτήρια (1-15)
+Έτσι, π.χ., οποιαδήποτε διάθεση ≤ 29 ήταν "χαμηλή" και τα branches για
+ύπνο/νερό δεν ενεργοποιούνταν ποτέ.
+
+Όρια διάθεσης: ≤4 χαμηλή, 5-7 μέτρια, ≥8 υψηλή -- ίδια με τα εικονίδια
+"καιρού" (icons.py), ώστε αυτό που βλέπει ο χρήστης να συμφωνεί με το κείμενο.
+"""
+
+from typing import Any, Tuple
+
+
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_checkin(mood: Any, sleep: Any, water: Any) -> Tuple[int, int, int]:
+    """Ασφαλής μετατροπή σε ακέραιους, με τις προεπιλογές των sliders του app."""
+    return _as_int(mood, 5), _as_int(sleep, 7), _as_int(water, 6)
+
+
+def personal_reply(mood: int, sleep: int, water: int) -> str:
+    mood, sleep, water = _normalize_checkin(mood, sleep, water)
     reply = ""
 
-    if mood < 30:
+    if mood <= 4:
         reply += "Δύσκολη μέρα… σε καταλαβαίνω. "
-    elif mood < 70:
+    elif mood <= 7:
         reply += "Φαίνεται πως η μέρα είχε πάνω-κάτω. "
     else:
         reply += "Χαίρομαι που σήμερα φαίνεται να είσαι σε σχετικά καλή διάθεση. "
 
-    if sleep == "0–2":
+    # Παλιά διαστήματα: "0–2", "3–5", "6–8", υπόλοιπα
+    if sleep <= 2:
         reply += "Ο πολύ λίγος ύπνος μπορεί να κάνει όλα τα συναισθήματα πιο έντονα. "
-    elif sleep == "3–5":
+    elif sleep <= 5:
         reply += "Δεν είναι κακό να υπάρχουν νύχτες με λίγο ύπνο, αλλά σε βάθος χρόνου σε κουράζει. "
-    elif sleep == "6–8":
+    elif sleep <= 8:
         reply += "Ο ύπνος σου φαίνεται σχετικά ισορροπημένος, που είναι καλή βάση. "
     else:
         reply += "Ο πολύς ύπνος μπορεί να είναι ανακουφιστικός, αλλά αξίζει να δούμε τι κρύβεται από πίσω. "
 
-    if water == "0":
+    # Παλιά διαστήματα: "0", "1–3", "4–6", υπόλοιπα
+    if water <= 0:
         reply += "Η έλλειψη νερού επηρεάζει το σώμα και το μυαλό, ίσως αξίζει να στοχεύσεις σε 1–2 ποτήρια αύριο. "
-    elif water == "1–3":
+    elif water <= 3:
         reply += "Η ενυδάτωσή σου είναι χαμηλή, αλλά είναι μια αρχή – μπορούμε να το βελτιώσουμε σταδιακά. "
-    elif water == "4–6":
+    elif water <= 6:
         reply += "Η ενυδάτωσή σου είναι σε καλό επίπεδο· το σώμα σου το εκτιμά. "
     else:
         reply += "Η πολύ καλή ενυδάτωση δείχνει ότι ήδη φροντίζεις τον εαυτό σου σε κάτι σημαντικό. "
@@ -29,16 +65,17 @@ def personal_reply(mood: int, sleep: str, water: str) -> str:
     return reply
 
 
-def fallback_therapeutic_reply(mood: int, sleep: str, water: str, user_text: str) -> str:
-    txt = user_text.lower()
+def fallback_therapeutic_reply(mood: int, sleep: int, water: int, user_text: str) -> str:
+    mood, sleep, water = _normalize_checkin(mood, sleep, water)
+    txt = (user_text or "").lower()
     parts: list[str] = []
 
-    if mood < 30:
+    if mood <= 4:
         parts.append(
             "Ακούγεται πως αυτή τη στιγμή κουβαλάς αρκετή συναισθηματική πίεση. "
             "Δεν είναι καθόλου εύκολο να νιώθεις έτσι και είναι σημαντικό που το αναγνωρίζεις."
         )
-    elif mood < 70:
+    elif mood <= 7:
         parts.append(
             "Η μέρα σου φαίνεται να είχε και καλές και δύσκολες στιγμές, "
             "κάτι που μπορεί να είναι αρκετά κουραστικό ψυχικά."
@@ -70,13 +107,13 @@ def fallback_therapeutic_reply(mood: int, sleep: str, water: str, user_text: str
             "έχει σημασία να δούμε πού νιώθεις περισσότερο μόνος/η."
         )
 
-    if sleep in ["0–2", "3–5"]:
+    if sleep <= 5:
         parts.append(
             "Ο λίγος ύπνος ενισχύει την ευαισθησία του νευρικού συστήματος, "
             "οπότε όλα τα συναισθήματα μπορεί να βιώνονται πιο έντονα."
         )
 
-    if water in ["0", "1–3"]:
+    if water <= 3:
         parts.append(
             "Η χαμηλή ενυδάτωση μπορεί επίσης να επηρεάζει ενέργεια, συγκέντρωση και διάθεση."
         )
@@ -89,8 +126,9 @@ def fallback_therapeutic_reply(mood: int, sleep: str, water: str, user_text: str
     return " ".join(parts)
 
 
-def exercise_suggestion(mood: int, sleep: str, water: str, user_text: str) -> str:
-    txt = user_text.lower()
+def exercise_suggestion(mood: int, sleep: int, water: int, user_text: str) -> str:
+    mood, sleep, water = _normalize_checkin(mood, sleep, water)
+    txt = (user_text or "").lower()
 
     if "άγχ" in txt or "αγχος" in txt or "φοβ" in txt:
         return (
@@ -113,20 +151,22 @@ def exercise_suggestion(mood: int, sleep: str, water: str, user_text: str) -> st
             "«Είναι εντάξει να νιώθω έτσι. Δεν είμαι ο/η μόνος/η που το περνάει.»"
         )
 
-    if water == "0":
+    # Το παλιό όριο ήταν το διάστημα "0" ποτήρια, που με slider 1-15 δεν
+    # μπορεί ποτέ να επιλεγεί. Χρησιμοποιούμε water <= 3 (ίδιο με το fallback).
+    if water <= 3:
         return (
             "💧 Άσκηση φροντίδας:\n"
             "Αν μπορείς τώρα, πιες ένα ποτήρι νερό πριν συνεχίσουμε. Είναι μια μικρή αλλά ουσιαστική κίνηση προς τον εαυτό σου."
         )
 
-    if sleep in ["0–2", "3–5"]:
+    if sleep <= 5:
         return (
             "😴 Μικρή άσκηση χαλάρωσης:\n"
             "Για 10 δευτερόλεπτα, χαλάρωσε συνειδητά τους ώμους και τη γνάθο σου, πάρε μία βαθιά ανάσα "
             "και άφησέ την αργά. Επανάλαβε 3 φορές."
         )
 
-    if mood > 70:
+    if mood >= 8:
         return (
             "🌿 Pocket journaling:\n"
             "Γράψε ένα πράγμα που πήγε καλά σήμερα, όσο μικρό κι αν είναι. "
@@ -140,7 +180,7 @@ def exercise_suggestion(mood: int, sleep: str, water: str, user_text: str) -> st
 
 
 def is_emergency(text: str) -> bool:
-    t = text.lower()
+    t = (text or "").lower()
     red_flags = [
         "αυτοκτον",
         "να αυτοκτον",
@@ -172,6 +212,7 @@ def emergency_message() -> str:
         • <b>1056</b> – «Χαμόγελο του Παιδιού» (για ανηλίκους)</p>
     </div>
     """
+
 
 def exercise_followup_reply(user_text: str) -> str:
     """
@@ -238,6 +279,7 @@ def exercise_followup_reply(user_text: str) -> str:
         "Σ’ ευχαριστώ που μοιράστηκες αυτή τη λέξη.\n\n"
         + tone
     )
+
 
 def targeted_question_from_profile(profile: dict, user_text: str) -> str | None:
     if not profile:

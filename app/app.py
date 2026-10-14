@@ -39,6 +39,7 @@ from rules import (
     emergency_message,
 )
 from emotional_map import render_emotional_map
+from safety import guard_free_text
 from components import (
     render_message,
     render_exercise_card,
@@ -1814,6 +1815,8 @@ with tab_ex:
             if st.button(t("ex2_button"), key="btn_discharge"):
                 if not discharge_input.strip():
                     st.warning(t("ex2_warning_empty"))
+                elif guard_free_text(discharge_input, "discharge"):
+                    pass
                 else:
                     with st.spinner(t("ex2_spinner")):
                         # ΚΛΗΣΗ ΣΤΟ LLM
@@ -2122,6 +2125,8 @@ with tab_ex:
                     supports = [s for s in [s1, s2, s3] if s.strip()]
                     if not supports:
                         st.warning(t("ex5_warning_empty"))
+                    elif guard_free_text(" ".join(supports), "supports"):
+                        pass
                     else:
                         with st.spinner(t("ex5_spinner")):
                             profile = load_profile()
@@ -2650,6 +2655,8 @@ with tab_reframe:
     if st.button(t("reframe_button"), key="reframe_button"):
         if not (thought_input or "").strip():
             st.warning(t("reframe_warning_empty"))
+        elif guard_free_text(thought_input, "reframe"):
+            pass
         else:
             with st.spinner(t("reframe_spinner")):
                 reframe_profile = load_profile()
