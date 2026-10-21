@@ -2758,6 +2758,11 @@ with tab_profile:
         unsafe_allow_html=True,
     )
 
+    # Σημάδι από την προηγούμενη αποθήκευση: το st.rerun() σβήνει ό,τι
+    # εμφανίστηκε μέσα στον handler, γι' αυτό το μήνυμα δείχνεται εδώ, μία φορά.
+    if st.session_state.pop("profile_safety_notice", False):
+        render_emergency_block(emergency_message())
+
     profile = load_profile()
 
     # --- ΚΕΝΤΡΙΚΗ ΠΕΡΙΟΧΗ (Glass Wrapper) ---
@@ -2806,6 +2811,17 @@ with tab_profile:
     col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
     with col_btn2:
         if st.button(t("profile_save_button"), use_container_width=True):
+            # Έλεγχος ασφαλείας στα πεδία ελεύθερου κειμένου, που μπαίνουν στο
+            # prompt σε κάθε μήνυμα. ΔΕΝ μπλοκάρει την αποθήκευση: αν υπάρξει
+            # ψευδώς θετικό, ο χρήστης δεν κλειδώνεται έξω από το chat, αλλά
+            # βλέπει πάντα το πρωτόκολλο ασφαλείας.
+            _profile_text = " ".join(
+                [context, main_goals, main_struggles, helpful_things, preferred_tone, triggers, soothing_things]
+            )
+            if is_emergency(_profile_text):
+                st.session_state["profile_safety_notice"] = True
+                log_checkin(None, None, None, "[profile] emergency keyword detected", is_emergency=True)
+
             new_profile = {
                 "name": name,
                 "age": int(age) if age else 0,
